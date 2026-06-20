@@ -152,7 +152,7 @@ export default function Page() {
     } md:static md:inset-auto md:bottom-auto md:top-auto md:z-auto md:block`;
 
   return (
-    <div className="flex h-[100dvh] w-screen flex-col gap-2 p-2">
+    <div className="fixed inset-0 flex flex-col gap-2 p-2">
       {showOnboarding && <Onboarding onClose={closeOnboarding} />}
 
       <div className="flex shrink-0 gap-2">
@@ -221,7 +221,7 @@ function StartScreen({ onStart, onResume }: { onStart: (iso: string) => void; on
     if (!ok) setResumeError(true);
   };
   return (
-    <div className="flex h-[100dvh] w-screen flex-col items-center justify-center gap-4 p-4 sm:p-6">
+    <div className="fixed inset-0 flex flex-col items-center justify-center gap-4 overflow-y-auto p-4 sm:p-6">
       <h1 className="neon-text text-center text-2xl font-bold tracking-widest text-[var(--wd-magenta)] sm:text-3xl">
         WORLD DOMINION
       </h1>
@@ -272,7 +272,7 @@ function StartScreen({ onStart, onResume }: { onStart: (iso: string) => void; on
 
 function Center({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex h-[100dvh] w-screen items-center justify-center px-4 text-center text-sm text-cyan-200/60">
+    <div className="fixed inset-0 flex items-center justify-center px-4 text-center text-sm text-cyan-200/60">
       <span className="pulse">{children}</span>
     </div>
   );
