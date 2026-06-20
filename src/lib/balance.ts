@@ -54,3 +54,37 @@ export const WORLD_EVENTS = {
   /** Per-roll probability that *some* world event fires. */
   chancePerRoll: 0.15,
 } as const;
+
+export const COMBAT = {
+  /** How fast control flips per minute per net-strength point. */
+  controlRate: 0.0008,
+  /** Attrition to attacker health per minute while engaged. */
+  attritionRate: 0.02,
+  /** Terrain defensive multipliers. */
+  terrain: { PLAINS: 1, FOREST: 1.2, MOUNTAIN: 1.5, DESERT: 0.9, URBAN: 1.4, COASTAL: 1.1 } as Record<string, number>,
+} as const;
+
+export const AI = {
+  /** Probability an AI nation takes an action per catch-up. */
+  actChance: 0.25,
+  /** Opinion below which an aggressive AI may declare war. */
+  warThreshold: -40,
+  /** Strength ratio (attacker/defender) an AI wants before invading. */
+  warStrengthRatio: 1.4,
+} as const;
+
+export const TRADE = {
+  /** Notional market price (money per unit) by good. */
+  price: { OIL: 0.08, FOOD: 0.04, STEEL: 0.06, RARE_MATERIALS: 0.3, MONEY: 1, TECHNOLOGY: 0.5 } as Record<string, number>,
+} as const;
+
+export const RESEARCH = {
+  /** Progress points per minute at 100% research budget allocation. */
+  baseProgressPerMin: 0.6,
+} as const;
+
+export const DIPLOMACY = {
+  declareWarOpinionHit: 40, // opinion lost with target & their allies
+  improveStep: 12, // opinion gained per diplomatic action
+  influenceCostImprove: 3,
+} as const;

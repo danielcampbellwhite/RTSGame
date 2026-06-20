@@ -55,6 +55,54 @@ function territoryPoints(s: WorldSnapshot): GeoJSON.FeatureCollection {
   };
 }
 
+function tradeLines(s: WorldSnapshot): GeoJSON.FeatureCollection {
+  const coord = new Map(s.countries.map((c) => [c.iso3, [c.lng, c.lat] as [number, number]]));
+  return {
+    type: "FeatureCollection",
+    features: s.tradeRoutes
+      .map((r) => {
+        const from = coord.get(r.fromIso);
+        const to = coord.get(r.toIso);
+        if (!from || !to) return null;
+        return {
+          type: "Feature" as const,
+          properties: { good: r.good },
+          geometry: { type: "LineString" as const, coordinates: [from, to] },
+        };
+      })
+      .filter(Boolean) as GeoJSON.Feature[],
+  };
+}
+
+function warPoints(s: WorldSnapshot): GeoJSON.FeatureCollection {
+  return {
+    type: "FeatureCollection",
+    features: s.warTargets.map((w) => ({
+      type: "Feature",
+      properties: { name: w.territoryName },
+      geometry: { type: "Point", coordinates: [w.lng, w.lat] },
+    })),
+  };
+}
+
+function armyPoints(s: WorldSnapshot): GeoJSON.FeatureCollection {
+  const terr = new Map(s.territories.map((t) => [t.id, [t.lng, t.lat] as [number, number]]));
+  return {
+    type: "FeatureCollection",
+    features: s.armies
+      .map((a) => {
+        const c = a.locationTerritoryId ? terr.get(a.locationTerritoryId) : undefined;
+        if (!c) return null;
+        return {
+          type: "Feature" as const,
+          properties: { name: a.name, strength: a.strength },
+          geometry: { type: "Point" as const, coordinates: c },
+        };
+      })
+      .filter(Boolean) as GeoJSON.Feature[],
+  };
+}
+
 export default function WorldMap() {
   const ref = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MlMap | null>(null);
@@ -110,7 +158,17 @@ export default function WorldMap() {
           },
         });
 
-        map.addSource("territories", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+        const empty: GeoJSON.FeatureCollection = { type: "FeatureCollection", features: [] };
+
+        map.addSource("trade", { type: "geojson", data: empty });
+        map.addLayer({
+          id: "trade",
+          type: "line",
+          source: "trade",
+          paint: { "line-color": "#34d399", "line-width": 1, "line-opacity": 0.5, "line-dasharray": [2, 2] },
+        });
+
+        map.addSource("territories", { type: "geojson", data: empty });
         map.addLayer({
           id: "territories",
           type: "circle",
@@ -121,6 +179,22 @@ export default function WorldMap() {
             "circle-stroke-color": "#f0f",
             "circle-stroke-width": 1.5,
           },
+        });
+
+        map.addSource("armies", { type: "geojson", data: empty });
+        map.addLayer({
+          id: "armies",
+          type: "circle",
+          source: "armies",
+          paint: { "circle-radius": 3.5, "circle-color": "#34d399", "circle-stroke-color": "#04060a", "circle-stroke-width": 1 },
+        });
+
+        map.addSource("wars", { type: "geojson", data: empty });
+        map.addLayer({
+          id: "wars-glow",
+          type: "circle",
+          source: "wars",
+          paint: { "circle-radius": 10, "circle-color": "#ef4444", "circle-blur": 1, "circle-opacity": 0.5 },
         });
 
         map.on("click", "country-core", (e) => {
@@ -152,6 +226,9 @@ export default function WorldMap() {
     const apply = () => {
       (map.getSource("countries") as GeoJSONSource | undefined)?.setData(countryPoints(snapshot));
       (map.getSource("territories") as GeoJSONSource | undefined)?.setData(territoryPoints(snapshot));
+      (map.getSource("trade") as GeoJSONSource | undefined)?.setData(tradeLines(snapshot));
+      (map.getSource("armies") as GeoJSONSource | undefined)?.setData(armyPoints(snapshot));
+      (map.getSource("wars") as GeoJSONSource | undefined)?.setData(warPoints(snapshot));
     };
     if (map.isStyleLoaded()) apply();
     else map.once("idle", apply);

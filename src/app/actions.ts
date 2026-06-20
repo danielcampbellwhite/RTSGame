@@ -4,9 +4,20 @@ import { prisma } from "@/lib/db";
 import { catchUp } from "@/lib/sim/engine";
 import { createGameWorld } from "@/lib/world";
 import { getWorldSnapshot, type WorldSnapshot } from "@/lib/snapshot";
-import { CONSTRUCTION } from "@/lib/balance";
-import type { BuildingType } from "@prisma/client";
+import { CONSTRUCTION, DIPLOMACY } from "@/lib/balance";
+import { recruit, orderMove } from "@/lib/sim/forces";
+import { startResearchProject } from "@/lib/sim/research";
+import { declareWar as declareWarCore, endWar, adjustOpinion, setFlags } from "@/lib/sim/diplomacy";
+import type { BuildingType, UnitType, TradeGood } from "@prisma/client";
 import { revalidatePath } from "next/cache";
+
+/** Resolve the player country for a game (catch-up should already have run). */
+async function player(gameId: string) {
+  return prisma.country.findFirst({ where: { gameId, isPlayer: true } });
+}
+async function countryByIso(gameId: string, iso3: string) {
+  return prisma.country.findUnique({ where: { gameId_iso3: { gameId, iso3 } } });
+}
 
 /** Create a new save controlled by the given country and return its snapshot. */
 export async function createGame(playerIso: string, playerName = "Commander") {
@@ -68,6 +79,94 @@ export async function queueBuilding(gameId: string, territoryId: string, type: B
       data: { territoryId, type, level: 0, buildingToLevel: 1, completesAt },
     });
   }
+  revalidatePath("/");
+  return getWorldSnapshot(gameId);
+}
+
+// ── MILITARY ───────────────────────────────────────────────────────────────
+export async function recruitUnit(gameId: string, type: UnitType, count: number) {
+  await catchUp(gameId);
+  const p = await player(gameId);
+  if (p) await recruit(p.id, type, count);
+  revalidatePath("/");
+  return getWorldSnapshot(gameId);
+}
+
+export async function moveArmy(gameId: string, armyId: string, territoryId: string) {
+  await catchUp(gameId);
+  const p = await player(gameId);
+  const army = await prisma.army.findUnique({ where: { id: armyId } });
+  if (p && army && army.countryId === p.id) await orderMove(armyId, territoryId);
+  revalidatePath("/");
+  return getWorldSnapshot(gameId);
+}
+
+// ── DIPLOMACY ────────────────────────────────────────────────────────────────
+export async function declareWar(gameId: string, targetIso: string) {
+  await catchUp(gameId);
+  const [p, target] = await Promise.all([player(gameId), countryByIso(gameId, targetIso)]);
+  if (p && target) await declareWarCore(gameId, p.id, target.id);
+  revalidatePath("/");
+  return getWorldSnapshot(gameId);
+}
+
+export async function proposePeace(gameId: string, warId: string) {
+  await catchUp(gameId);
+  await endWar(warId);
+  revalidatePath("/");
+  return getWorldSnapshot(gameId);
+}
+
+export async function improveRelations(gameId: string, targetIso: string) {
+  await catchUp(gameId);
+  const [p, target] = await Promise.all([player(gameId), countryByIso(gameId, targetIso)]);
+  if (p && target && p.influence >= DIPLOMACY.influenceCostImprove) {
+    await prisma.country.update({ where: { id: p.id }, data: { influence: p.influence - DIPLOMACY.influenceCostImprove } });
+    await adjustOpinion(p.id, target.id, DIPLOMACY.improveStep);
+  }
+  revalidatePath("/");
+  return getWorldSnapshot(gameId);
+}
+
+export async function toggleEmbargo(gameId: string, targetIso: string, embargo: boolean) {
+  await catchUp(gameId);
+  const [p, target] = await Promise.all([player(gameId), countryByIso(gameId, targetIso)]);
+  if (p && target) await setFlags(p.id, target.id, { embargo });
+  revalidatePath("/");
+  return getWorldSnapshot(gameId);
+}
+
+// ── TRADE ──────────────────────────────────────────────────────────────────
+export async function createTradeRoute(
+  gameId: string,
+  otherIso: string,
+  good: TradeGood,
+  ratePerDay: number,
+  direction: "IMPORT" | "EXPORT"
+) {
+  await catchUp(gameId);
+  const [p, other] = await Promise.all([player(gameId), countryByIso(gameId, otherIso)]);
+  if (p && other) {
+    const fromId = direction === "EXPORT" ? p.id : other.id;
+    const toId = direction === "EXPORT" ? other.id : p.id;
+    await prisma.tradeRoute.create({ data: { fromId, toId, good, ratePerDay: Math.max(0, ratePerDay) } });
+  }
+  revalidatePath("/");
+  return getWorldSnapshot(gameId);
+}
+
+export async function cancelTradeRoute(gameId: string, routeId: string) {
+  await catchUp(gameId);
+  await prisma.tradeRoute.deleteMany({ where: { id: routeId } });
+  revalidatePath("/");
+  return getWorldSnapshot(gameId);
+}
+
+// ── RESEARCH ─────────────────────────────────────────────────────────────────
+export async function startResearch(gameId: string, techKey: string) {
+  await catchUp(gameId);
+  const p = await player(gameId);
+  if (p) await startResearchProject(p.id, techKey);
   revalidatePath("/");
   return getWorldSnapshot(gameId);
 }

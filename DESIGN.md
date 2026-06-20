@@ -237,17 +237,21 @@ dashed trade routes.
 
 | Phase | Scope                       | Status                                  |
 |-------|-----------------------------|-----------------------------------------|
-| 1     | Map & countries             | ✅ implemented (this session)           |
-| 2     | Economy                     | ◐ tick engine + economy/morale wired    |
-| 3     | Buildings                   | ◐ schema + construction timers in tick  |
-| 4     | Military & combat           | ▢ schema + order/movement hooks         |
-| 5     | AI                          | ▢ personality model + utility-AI hook   |
-| 6     | Diplomacy                   | ▢ relation model + actions stubbed      |
-| 7     | Trade                       | ▢ route model + stubbed flows           |
-| 8     | Research & world events     | ▢ schema + event emitter scaffolded     |
-| 9     | Polish (animations, audio, balancing, tutorial) | ▢            |
+| 1     | Map & countries             | ✅ map, ~60 nations, sectors, snapshot   |
+| 2     | Economy                     | ✅ revenue/upkeep/GDP/resources/inflation|
+| 3     | Buildings                   | ✅ construction timers + production       |
+| 4     | Military & combat           | ✅ units, armies, movement, front-line combat, capture |
+| 5     | AI                          | ✅ utility AI (economy/military/diplo/war)|
+| 6     | Diplomacy                   | ✅ opinion, war/peace, embargo, alliances |
+| 7     | Trade                       | ✅ routes, market pricing, resource flows |
+| 8     | Research & world events     | ✅ tech tree + effects, world events      |
+| 9     | Polish                      | ◐ tabbed command UI + map overlays done; animations/audio/tutorial pending |
 
-Legend: ✅ done · ◐ foundation working, depth pending · ▢ scaffolded for next phase.
+Legend: ✅ done · ◐ foundation working, depth pending.
+
+Verified: `prisma generate`, `tsc --noEmit` and `next build` all pass. The
+simulation has not yet been exercised against a live Postgres instance (none in
+the build environment) — first run requires `db:push` + `db:seed`.
 
 ---
 

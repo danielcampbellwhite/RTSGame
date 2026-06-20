@@ -60,9 +60,13 @@ src/components/           WorldMap / ResourceBar / InfoPanel / EventFeed
 | Phase | Scope | Status |
 |---|---|---|
 | 1 | Map & countries | ✅ done |
-| 2 | Economy | ◐ economy/morale wired into the tick |
-| 3 | Buildings | ◐ construction timers working |
-| 4–8 | Military, AI, diplomacy, trade, research, events | ▢ schema + hooks scaffolded |
-| 9 | Polish | ▢ |
+| 2 | Economy | ✅ revenue, upkeep, GDP, resources, inflation |
+| 3 | Buildings | ✅ construction timers + production |
+| 4 | Military & combat | ✅ units, armies, movement, front-line combat, capture |
+| 5 | AI | ✅ personality-driven utility AI |
+| 6 | Diplomacy | ✅ opinion, war/peace, embargo |
+| 7 | Trade | ✅ routes, pricing, resource flows |
+| 8 | Research & world events | ✅ tech tree + effects, world events |
+| 9 | Polish | ◐ tabbed command UI + map overlays (animations/audio/tutorial pending) |
 
-See `DESIGN.md` §9 for the roadmap.
+All phases compile and build clean. See `DESIGN.md` §9 for detail.

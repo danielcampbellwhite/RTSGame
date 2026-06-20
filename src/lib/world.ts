@@ -1,6 +1,13 @@
 import { prisma } from "@/lib/db";
 import { COUNTRIES, KNOWN_SECTORS, type CountrySeed } from "@/data/countries";
-import type { Prisma, TerritoryKind } from "@prisma/client";
+import { forceStrength } from "@/lib/units";
+import type { Prisma, TerritoryKind, UnitType } from "@prisma/client";
+
+// Historic rivalries seeded with negative opinion so aggressive AI has targets.
+const RIVALRIES: [string, string][] = [
+  ["USA", "RUS"], ["USA", "CHN"], ["CHN", "IND"], ["IND", "PAK"], ["RUS", "UKR"],
+  ["ISR", "IRN"], ["KOR", "PRK"], ["GRC", "TUR"], ["SAU", "IRN"], ["JPN", "CHN"],
+];
 
 /**
  * Build a fresh world (one save). Creates the player's country plus every AI
@@ -53,7 +60,50 @@ export async function createGameWorld(
     });
   }
 
+  await seedArmies(game.id);
+  await seedRivalries(game.id);
   return game.id;
+}
+
+/** Give every country a starting army stationed at its capital. */
+async function seedArmies(gameId: string): Promise<void> {
+  const countries = await prisma.country.findMany({
+    where: { gameId },
+    include: { territories: { where: { kind: "CAPITAL" }, take: 1 } },
+  });
+  for (const c of countries) {
+    const capital = c.territories[0];
+    const infantry = Math.max(2, Math.floor(c.gdp / 300) + 2);
+    const tanks = c.influence > 30 ? Math.floor(c.gdp / 1500) + 1 : 0;
+    const units: { type: UnitType; count: number; health: number }[] = [
+      { type: "INFANTRY", count: infantry, health: 100 },
+    ];
+    if (tanks > 0) units.push({ type: "TANK", count: tanks, health: 100 });
+
+    await prisma.army.create({
+      data: {
+        countryId: c.id,
+        name: "1st Army",
+        locationTerritoryId: capital?.id ?? null,
+        strength: forceStrength(units.map((u) => ({ ...u, health: 100 }))),
+        units: { create: units.map((u) => ({ type: u.type, count: u.count })) },
+      },
+    });
+  }
+}
+
+/** Seed negative opinion between historic rivals present in this game. */
+async function seedRivalries(gameId: string): Promise<void> {
+  const countries = await prisma.country.findMany({ where: { gameId }, select: { id: true, iso3: true } });
+  const byIso = new Map(countries.map((c) => [c.iso3, c.id]));
+  for (const [a, b] of RIVALRIES) {
+    const aId = byIso.get(a);
+    const bId = byIso.get(b);
+    if (!aId || !bId) continue;
+    for (const [from, to] of [[aId, bId], [bId, aId]] as const) {
+      await prisma.diplomaticRelation.create({ data: { fromId: from, toId: to, opinion: -50 } });
+    }
+  }
 }
 
 function makeTerritories(seed: CountrySeed): Prisma.TerritoryCreateWithoutCountryInput[] {
