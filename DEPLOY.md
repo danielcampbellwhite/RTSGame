@@ -48,18 +48,22 @@ build, `prisma migrate deploy` connects to Neon over `DIRECT_URL` and creates al
 tables from `prisma/migrations/`. When the build finishes, the app is live.
 
 ## 6. Background simulation (the cron)
-`vercel.json` declares a 1-minute cron hitting `/api/tick`, which advances every
-active game while players are offline.
+`vercel.json` declares a **daily** cron hitting `/api/tick` — the most the Vercel
+**Hobby** plan allows. The world also advances whenever anyone opens the app
+(on-read catch-up). For proper offline progression on the free tier, this repo
+includes a **GitHub Actions workflow** (`.github/workflows/tick.yml`) that pings
+`/api/tick` every ~5 minutes.
 
-- **Vercel Pro** → the minute cron runs as-is. Nothing more to do.
-- **Vercel Hobby (free)** → Vercel only allows ~daily crons. The world still
-  advances whenever someone opens the app (on-read catch-up). For true offline
-  progression, point a free external pinger at the endpoint every minute:
-  ```
-  GET https://<your-app>.vercel.app/api/tick
-  Header: Authorization: Bearer <CRON_SECRET>
-  ```
-  Use cron-job.org or a GitHub Actions scheduled workflow.
+Enable it: in the GitHub repo → **Settings → Secrets and variables → Actions**,
+add two secrets:
+- `TICK_URL` → `https://<your-app>.vercel.app/api/tick`
+- `CRON_SECRET` → the same value you set in Vercel
+
+The workflow runs on the default branch (`main`) automatically; you can also run
+it manually from the **Actions** tab (workflow_dispatch).
+
+**If you upgrade to Vercel Pro:** change `vercel.json`'s schedule to `* * * * *`
+for a native minute cron and you can drop the GitHub Action.
 
 ## 7. Play
 Open the deployed URL → pick a nation → the world is generated in Neon and you're

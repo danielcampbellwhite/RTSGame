@@ -1,0 +1,26 @@
+name: World Dominion simulation tick
+
+# Drives the persistent world simulation while players are offline, free on the
+# Vercel Hobby plan (whose own cron is limited to once per day). GitHub Actions
+# schedules run at ~5-minute minimum granularity and may be delayed under load —
+# that's fine, the catch-up engine integrates whatever wall-clock time elapsed.
+#
+# Required repository secrets (Settings -> Secrets and variables -> Actions):
+#   TICK_URL     e.g. https://your-app.vercel.app/api/tick
+#   CRON_SECRET  the same value set in Vercel's env vars
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch: {}
+
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping /api/tick
+        run: |
+          curl -fsS -m 30 \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            "${{ secrets.TICK_URL }}" \
+            -o /dev/null -w "tick -> HTTP %{http_code}\n"
