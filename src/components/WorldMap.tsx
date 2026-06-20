@@ -85,6 +85,19 @@ function warPoints(s: WorldSnapshot): GeoJSON.FeatureCollection {
   };
 }
 
+// Our dataset names vs world-atlas country names, where they differ.
+const NAME_ALIAS: Record<string, string> = {
+  "United States": "United States of America",
+  Czechia: "Czech Republic",
+  Tanzania: "United Republic of Tanzania",
+  Serbia: "Republic of Serbia",
+};
+
+function playerNames(name: string): string[] {
+  const alias = NAME_ALIAS[name];
+  return alias ? [name, alias] : [name];
+}
+
 function armyPoints(s: WorldSnapshot): GeoJSON.FeatureCollection {
   const terr = new Map(s.territories.map((t) => [t.id, [t.lng, t.lat] as [number, number]]));
   return {
@@ -128,6 +141,28 @@ export default function WorldMap() {
       mapRef.current = map;
 
       map.on("load", () => {
+        // Real world landmasses + neon country borders (token-free static GeoJSON).
+        map.addSource("world", { type: "geojson", data: "/world.geojson" });
+        map.addLayer({
+          id: "world-fill",
+          type: "fill",
+          source: "world",
+          paint: { "fill-color": "#0a1a28", "fill-opacity": 0.85 },
+        });
+        map.addLayer({
+          id: "player-fill",
+          type: "fill",
+          source: "world",
+          paint: { "fill-color": "#f0f", "fill-opacity": 0.22 },
+          filter: ["==", ["get", "name"], "__none__"],
+        });
+        map.addLayer({
+          id: "world-border",
+          type: "line",
+          source: "world",
+          paint: { "line-color": "#22d3ee", "line-width": 0.5, "line-opacity": 0.45 },
+        });
+
         map.addSource("grid", { type: "geojson", data: graticule() });
         map.addLayer({
           id: "grid",
@@ -229,6 +264,9 @@ export default function WorldMap() {
       (map.getSource("trade") as GeoJSONSource | undefined)?.setData(tradeLines(snapshot));
       (map.getSource("armies") as GeoJSONSource | undefined)?.setData(armyPoints(snapshot));
       (map.getSource("wars") as GeoJSONSource | undefined)?.setData(warPoints(snapshot));
+      if (map.getLayer("player-fill")) {
+        map.setFilter("player-fill", ["in", ["get", "name"], ["literal", playerNames(snapshot.player.name)]]);
+      }
     };
     if (map.isStyleLoaded()) apply();
     else map.once("idle", apply);
