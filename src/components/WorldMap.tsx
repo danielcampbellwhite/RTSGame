@@ -1,7 +1,7 @@
 "use client";
 
 import "maplibre-gl/dist/maplibre-gl.css";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Map as MlMap, GeoJSONSource, Popup } from "maplibre-gl";
 import { useGameStore } from "@/store/game";
 import type { WorldSnapshot } from "@/lib/snapshot";
@@ -117,12 +117,26 @@ function armyPoints(s: WorldSnapshot): GeoJSON.FeatureCollection {
   };
 }
 
+function webglAvailable(): boolean {
+  try {
+    const c = document.createElement("canvas");
+    return !!(
+      window.WebGLRenderingContext &&
+      (c.getContext("webgl2") || c.getContext("webgl") || c.getContext("experimental-webgl"))
+    );
+  } catch {
+    return false;
+  }
+}
+
 export default function WorldMap() {
   const ref = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MlMap | null>(null);
   const popupRef = useRef<Popup | null>(null);
   const roRef = useRef<ResizeObserver | null>(null);
   const nameToIso = useRef<Map<string, string>>(new Map());
+  const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
+  const [msg, setMsg] = useState("");
   const snapshot = useGameStore((s) => s.snapshot);
   const selectCountry = useGameStore((s) => s.selectCountry);
   const selectTerritory = useGameStore((s) => s.selectTerritory);
@@ -132,6 +146,12 @@ export default function WorldMap() {
     (async () => {
       const maplibregl = (await import("maplibre-gl")).default;
       if (cancelled || !ref.current || mapRef.current) return;
+
+      if (!webglAvailable()) {
+        setMsg("WebGL is not available in this browser/device.");
+        setStatus("error");
+        return;
+      }
 
       const map = new maplibregl.Map({
         container: ref.current,
@@ -143,7 +163,12 @@ export default function WorldMap() {
         minZoom: 1,
       });
       mapRef.current = map;
-      map.on("error", (e) => console.error("[WorldMap] maplibre error", e?.error ?? e));
+      map.on("error", (e) => {
+        const text = (e?.error as Error)?.message ?? String(e);
+        console.error("[WorldMap] maplibre error", e?.error ?? e);
+        setMsg(text);
+        setStatus((s) => (s === "ready" ? s : "error"));
+      });
 
       // MapLibre can init before the flex container has its final size; keep the
       // canvas in sync so the map is never rendered into a zero-height box.
@@ -153,6 +178,7 @@ export default function WorldMap() {
 
       map.on("load", () => {
         map.resize();
+        setStatus("ready");
         // Real world landmasses + neon country borders (token-free static GeoJSON).
         map.addSource("world", { type: "geojson", data: "/world.geojson" });
         map.addLayer({
@@ -317,5 +343,16 @@ export default function WorldMap() {
     else map.once("idle", apply);
   }, [snapshot]);
 
-  return <div ref={ref} className="absolute inset-0" />;
+  return (
+    <>
+      <div ref={ref} className="absolute inset-0" />
+      {status !== "ready" && (
+        <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center p-4 text-center text-xs">
+          <span className={status === "error" ? "text-[var(--wd-red)]" : "pulse text-cyan-200/60"}>
+            {status === "error" ? `Map failed to load: ${msg}` : "Loading map…"}
+          </span>
+        </div>
+      )}
+    </>
+  );
 }
