@@ -152,7 +152,7 @@ export default function Page() {
     } md:static md:inset-auto md:bottom-auto md:top-auto md:z-auto md:block`;
 
   return (
-    <div className="fixed inset-0 flex flex-col gap-2 p-2">
+    <div className="fixed inset-0 grid grid-rows-[auto_1fr_auto] gap-2 p-2">
       {showOnboarding && <Onboarding onClose={closeOnboarding} />}
 
       <div className="flex shrink-0 gap-2">
@@ -162,9 +162,10 @@ export default function Page() {
         </div>
       </div>
 
-      <div className="relative flex min-h-0 flex-1 flex-col gap-2 md:grid md:grid-cols-[1fr_340px] md:grid-rows-[minmax(0,1fr)_7rem]">
-        {/* Map */}
-        <div className="panel glow-border relative min-h-0 flex-1 overflow-hidden md:col-start-1 md:row-start-1">
+      <div className="relative min-h-0 md:grid md:grid-cols-[1fr_340px] md:grid-rows-[minmax(0,1fr)_7rem] md:gap-2">
+        {/* Map — fills its grid row via absolute positioning (mobile) or the
+            grid cell (desktop), so its height never depends on flex-grow. */}
+        <div className="panel glow-border absolute inset-0 overflow-hidden md:static md:relative md:inset-auto md:col-start-1 md:row-start-1">
           <WorldMap />
           <button
             onClick={() => setShowOnboarding(true)}
