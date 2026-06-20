@@ -31,6 +31,19 @@ export default function Page() {
   const [unread, setUnread] = useState(0);
   const [muted, setMuted] = useState(false);
   const lastTopEvent = useRef<string | null>(null);
+  // Drive the shell height from JS (innerHeight in px) so it never depends on
+  // dvh units or the `inset` shorthand, which some browsers don't support.
+  const [vh, setVh] = useState<number | null>(null);
+  useEffect(() => {
+    const update = () => setVh(window.innerHeight);
+    update();
+    window.addEventListener("resize", update);
+    window.addEventListener("orientationchange", update);
+    return () => {
+      window.removeEventListener("resize", update);
+      window.removeEventListener("orientationchange", update);
+    };
+  }, []);
 
   useEffect(() => {
     if (typeof window !== "undefined") setMuted(localStorage.getItem(MUTE_KEY) === "1");
@@ -152,7 +165,10 @@ export default function Page() {
     } md:static md:inset-auto md:bottom-auto md:top-auto md:z-auto md:block`;
 
   return (
-    <div className="fixed inset-0 grid grid-rows-[auto_1fr_auto] gap-2 p-2">
+    <div
+      style={{ height: vh ? `${vh}px` : "100vh" }}
+      className="grid w-screen grid-rows-[auto_1fr_auto] gap-2 overflow-hidden p-2"
+    >
       {showOnboarding && <Onboarding onClose={closeOnboarding} />}
 
       <div className="flex shrink-0 gap-2">
@@ -165,7 +181,7 @@ export default function Page() {
       <div className="relative min-h-0 md:grid md:grid-cols-[1fr_340px] md:grid-rows-[minmax(0,1fr)_7rem] md:gap-2">
         {/* Map — fills its grid row via absolute positioning (mobile) or the
             grid cell (desktop), so its height never depends on flex-grow. */}
-        <div className="panel glow-border absolute inset-0 overflow-hidden md:static md:relative md:inset-auto md:col-start-1 md:row-start-1">
+        <div className="panel glow-border relative h-full w-full overflow-hidden md:col-start-1 md:row-start-1">
           <WorldMap />
           <button
             onClick={() => setShowOnboarding(true)}

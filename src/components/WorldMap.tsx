@@ -368,9 +368,9 @@ export default function WorldMap() {
 
   return (
     <>
-      <div ref={ref} className="absolute inset-0" />
+      <div ref={ref} className="h-full w-full" />
       {status !== "ready" && (
-        <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center p-4 text-center text-xs">
+        <div className="pointer-events-none absolute left-0 top-0 z-10 flex h-full w-full items-center justify-center p-4 text-center text-xs">
           <span className={status === "error" ? "text-[var(--wd-red)]" : "pulse text-cyan-200/60"}>
             {status === "error" ? `Map failed to load: ${msg}` : "Loading map…"}
           </span>
