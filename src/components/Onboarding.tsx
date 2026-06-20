@@ -31,15 +31,36 @@ export default function Onboarding({ onClose }: { onClose: () => void }) {
           <li>🔬 <b>Research.</b> Spend your research budget on the tech tree.</li>
           <li>⏱️ <b>Time.</b> Pause or speed up with the controls top-left.</li>
         </ul>
-        <p className="mb-4 text-[11px] text-cyan-200/40">
+        <p className="mb-3 text-[11px] text-cyan-200/40">
           There's no single win condition — climb the rankings, dominate a region, or just survive.
         </p>
 
+        <SaveCode code={snapshot.gameId} />
+
         <button
           onClick={onClose}
-          className="w-full rounded border border-[var(--wd-cyan)] py-2 text-sm text-[var(--wd-cyan)] hover:bg-[var(--wd-cyan)]/10"
+          className="mt-3 w-full rounded border border-[var(--wd-cyan)] py-2 text-sm text-[var(--wd-cyan)] hover:bg-[var(--wd-cyan)]/10"
         >
           Take Command
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function SaveCode({ code }: { code: string }) {
+  const copy = () => {
+    if (typeof navigator !== "undefined" && navigator.clipboard) navigator.clipboard.writeText(code).catch(() => {});
+  };
+  return (
+    <div className="rounded border border-[var(--wd-border)] p-2">
+      <div className="text-[9px] uppercase tracking-widest text-cyan-200/40">
+        Save code — copy this to resume on another device
+      </div>
+      <div className="flex items-center gap-2">
+        <code className="flex-1 truncate text-[11px] text-cyan-200/80">{code}</code>
+        <button onClick={copy} className="rounded border border-[var(--wd-border)] px-2 py-0.5 text-[10px] hover:border-[var(--wd-cyan)] hover:text-[var(--wd-cyan)]">
+          Copy
         </button>
       </div>
     </div>

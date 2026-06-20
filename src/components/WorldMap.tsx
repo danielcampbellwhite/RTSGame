@@ -1,5 +1,6 @@
 "use client";
 
+import "maplibre-gl/dist/maplibre-gl.css";
 import { useEffect, useRef } from "react";
 import type { Map as MlMap, GeoJSONSource, Popup } from "maplibre-gl";
 import { useGameStore } from "@/store/game";
@@ -120,6 +121,7 @@ export default function WorldMap() {
   const ref = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MlMap | null>(null);
   const popupRef = useRef<Popup | null>(null);
+  const roRef = useRef<ResizeObserver | null>(null);
   const nameToIso = useRef<Map<string, string>>(new Map());
   const snapshot = useGameStore((s) => s.snapshot);
   const selectCountry = useGameStore((s) => s.selectCountry);
@@ -141,15 +143,23 @@ export default function WorldMap() {
         minZoom: 1,
       });
       mapRef.current = map;
+      map.on("error", (e) => console.error("[WorldMap] maplibre error", e?.error ?? e));
+
+      // MapLibre can init before the flex container has its final size; keep the
+      // canvas in sync so the map is never rendered into a zero-height box.
+      const ro = new ResizeObserver(() => mapRef.current?.resize());
+      if (ref.current) ro.observe(ref.current);
+      roRef.current = ro;
 
       map.on("load", () => {
+        map.resize();
         // Real world landmasses + neon country borders (token-free static GeoJSON).
         map.addSource("world", { type: "geojson", data: "/world.geojson" });
         map.addLayer({
           id: "world-fill",
           type: "fill",
           source: "world",
-          paint: { "fill-color": "#0a1a28", "fill-opacity": 0.85 },
+          paint: { "fill-color": "#13283d", "fill-opacity": 1 },
         });
         map.addLayer({
           id: "player-fill",
@@ -162,7 +172,7 @@ export default function WorldMap() {
           id: "world-border",
           type: "line",
           source: "world",
-          paint: { "line-color": "#22d3ee", "line-width": 0.5, "line-opacity": 0.45 },
+          paint: { "line-color": "#22d3ee", "line-width": 0.8, "line-opacity": 0.7 },
         });
 
         map.addSource("grid", { type: "geojson", data: graticule() });
@@ -272,6 +282,8 @@ export default function WorldMap() {
 
     return () => {
       cancelled = true;
+      roRef.current?.disconnect();
+      roRef.current = null;
       mapRef.current?.remove();
       mapRef.current = null;
     };

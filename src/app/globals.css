@@ -1,5 +1,6 @@
 @import "tailwindcss";
-@import "maplibre-gl/dist/maplibre-gl.css";
+/* maplibre-gl CSS is imported from the WorldMap component so the canvas sizes
+   correctly even if global CSS resolution differs in production. */
 
 :root {
   --wd-bg: #04060a;

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import dynamic from "next/dynamic";
 import { useGameStore } from "@/store/game";
 import { createGame, fetchSnapshot } from "@/app/actions";
@@ -10,8 +10,10 @@ import InfoPanel from "@/components/InfoPanel";
 import EventFeed from "@/components/EventFeed";
 import TimeControl from "@/components/TimeControl";
 import Onboarding from "@/components/Onboarding";
+import { playBlip } from "@/lib/sound";
 
 const ONBOARD_KEY = "wd_onboarded";
+const MUTE_KEY = "wd_muted";
 
 const WorldMap = dynamic(() => import("@/components/WorldMap"), { ssr: false });
 
@@ -26,6 +28,49 @@ export default function Page() {
   const [booting, setBooting] = useState(true);
   const [mobileTab, setMobileTab] = useState<"map" | "info" | "feed">("map");
   const [showOnboarding, setShowOnboarding] = useState(false);
+  const [unread, setUnread] = useState(0);
+  const [muted, setMuted] = useState(false);
+  const lastTopEvent = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") setMuted(localStorage.getItem(MUTE_KEY) === "1");
+  }, []);
+
+  // Detect new feed entries → blip + (on mobile) unread badge.
+  useEffect(() => {
+    const events = snapshot?.events ?? [];
+    const top = events[0]?.id ?? null;
+    if (!top) return;
+    if (lastTopEvent.current === null) {
+      lastTopEvent.current = top; // first load: don't notify
+      return;
+    }
+    if (top !== lastTopEvent.current) {
+      let n = 0;
+      for (const e of events) {
+        if (e.id === lastTopEvent.current) break;
+        n++;
+      }
+      lastTopEvent.current = top;
+      if (n > 0) {
+        if (!muted) playBlip();
+        if (typeof window !== "undefined" && !window.matchMedia("(min-width:768px)").matches) {
+          setUnread((u) => u + n);
+        }
+      }
+    }
+  }, [snapshot, muted]);
+
+  useEffect(() => {
+    if (mobileTab === "feed") setUnread(0);
+  }, [mobileTab]);
+
+  const toggleMute = () =>
+    setMuted((m) => {
+      const v = !m;
+      if (typeof window !== "undefined") localStorage.setItem(MUTE_KEY, v ? "1" : "0");
+      return v;
+    });
 
   // Tapping something on the map should reveal the control sheet on mobile.
   useEffect(() => {
@@ -80,8 +125,23 @@ export default function Page() {
     setBooting(false);
   };
 
+  // Resume an existing save by its code (the game id). Returns false if invalid.
+  const resume = async (code: string): Promise<boolean> => {
+    const trimmed = code.trim();
+    if (!trimmed) return false;
+    setBooting(true);
+    const snap = await fetchSnapshot(trimmed);
+    if (snap) {
+      localStorage.setItem(STORAGE_KEY, trimmed);
+      setGameId(trimmed);
+      return true;
+    }
+    setBooting(false);
+    return false;
+  };
+
   if (booting) return <Center>Initialising command center…</Center>;
-  if (!gameId) return <StartScreen onStart={start} />;
+  if (!gameId) return <StartScreen onStart={start} onResume={resume} />;
   if (!snapshot) return <Center>Syncing world state…</Center>;
 
   // Mobile sheet wrappers: full-screen overlays toggled by the bottom tab bar;
@@ -122,7 +182,7 @@ export default function Page() {
 
         {/* Event feed — desktop full-width bottom, mobile slide-up sheet */}
         <div className={`${sheet(mobileTab === "feed")} md:col-span-2 md:col-start-1 md:row-start-2`}>
-          <EventFeed />
+          <EventFeed muted={muted} onToggleMute={toggleMute} />
         </div>
       </div>
 
@@ -132,11 +192,16 @@ export default function Page() {
           <button
             key={t}
             onClick={() => setMobileTab(t)}
-            className={`panel flex-1 rounded py-2 text-[11px] uppercase tracking-widest ${
+            className={`panel relative flex-1 rounded py-2 text-[11px] uppercase tracking-widest ${
               mobileTab === t ? "text-[var(--wd-cyan)] glow-border" : "text-cyan-200/50"
             }`}
           >
             {t === "map" ? "Map" : t === "info" ? "Command" : "Feed"}
+            {t === "feed" && unread > 0 && (
+              <span className="pulse absolute right-1 top-1 min-w-4 rounded-full bg-[var(--wd-red)] px-1 text-[9px] leading-4 text-white">
+                {unread}
+              </span>
+            )}
           </button>
         ))}
       </div>
@@ -144,9 +209,17 @@ export default function Page() {
   );
 }
 
-function StartScreen({ onStart }: { onStart: (iso: string) => void }) {
+function StartScreen({ onStart, onResume }: { onStart: (iso: string) => void; onResume: (code: string) => Promise<boolean> }) {
   const [query, setQuery] = useState("");
+  const [code, setCode] = useState("");
+  const [resumeError, setResumeError] = useState(false);
   const list = COUNTRIES.filter((c) => c.name.toLowerCase().includes(query.toLowerCase()));
+
+  const tryResume = async () => {
+    setResumeError(false);
+    const ok = await onResume(code);
+    if (!ok) setResumeError(true);
+  };
   return (
     <div className="flex h-[100dvh] w-screen flex-col items-center justify-center gap-4 p-4 sm:p-6">
       <h1 className="neon-text text-center text-2xl font-bold tracking-widest text-[var(--wd-magenta)] sm:text-3xl">
@@ -173,6 +246,25 @@ function StartScreen({ onStart }: { onStart: (iso: string) => void }) {
             {c.super && <span className="ml-1 text-[9px] text-[var(--wd-magenta)]">★</span>}
           </button>
         ))}
+      </div>
+
+      <div className="mt-2 flex w-full max-w-xs flex-col items-center gap-1">
+        <div className="text-[10px] uppercase tracking-widest text-cyan-200/40">Resume a save</div>
+        <div className="flex w-full gap-1">
+          <input
+            placeholder="Paste save code…"
+            value={code}
+            onChange={(e) => setCode(e.target.value)}
+            className="panel flex-1 rounded px-2 py-1.5 text-xs outline-none"
+          />
+          <button
+            onClick={tryResume}
+            className="rounded border border-[var(--wd-cyan)] px-3 text-xs text-[var(--wd-cyan)] hover:bg-[var(--wd-cyan)]/10"
+          >
+            Load
+          </button>
+        </div>
+        {resumeError && <div className="text-[10px] text-[var(--wd-red)]">No save found for that code.</div>}
       </div>
     </div>
   );
