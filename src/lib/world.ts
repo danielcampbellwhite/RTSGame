@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { prisma } from "@/lib/db";
 import { COUNTRIES, KNOWN_SECTORS, type CountrySeed } from "@/data/countries";
 import { forceStrength } from "@/lib/units";
@@ -10,165 +11,161 @@ const RIVALRIES: [string, string][] = [
 ];
 
 /**
- * Build a fresh world (one save). Creates the player's country plus every AI
- * nation with territories and starting buildings. Returns the new game id.
+ * Build a fresh world (one save): the player's country plus every AI nation with
+ * territories, buildings, a starting army and rivalries.
+ *
+ * IDs are generated up front so the entire world is written in a handful of
+ * batched `createMany` calls rather than ~140 sequential inserts — this keeps
+ * world creation comfortably inside a serverless function timeout.
  */
 export async function createGameWorld(
   playerIso: string,
   playerName = "Commander",
   playerEmail?: string
 ): Promise<string> {
-  const game = await prisma.game.create({
-    data: { playerCountry: playerIso, playerName, playerEmail, lastTickAt: new Date() },
-  });
+  const gameId = randomUUID();
+
+  const countries: Prisma.CountryCreateManyInput[] = [];
+  const territories: Prisma.TerritoryCreateManyInput[] = [];
+  const buildings: Prisma.BuildingCreateManyInput[] = [];
+  const armies: Prisma.ArmyCreateManyInput[] = [];
+  const units: Prisma.UnitCreateManyInput[] = [];
+  const relations: Prisma.DiplomaticRelationCreateManyInput[] = [];
+  const idByIso = new Map<string, string>();
 
   for (const seed of COUNTRIES) {
+    const countryId = randomUUID();
+    idByIso.set(seed.iso3, countryId);
     const isPlayer = seed.iso3 === playerIso;
     const superScale = seed.super ? 1.4 : 1;
 
-    await prisma.country.create({
-      data: {
-        gameId: game.id,
-        iso3: seed.iso3,
-        name: seed.name,
-        capitalLng: seed.capital[0],
-        capitalLat: seed.capital[1],
-        isPlayer,
-        population: seed.population,
-        gdp: seed.gdp,
-        stability: clamp(45 + Math.log10(seed.gdp + 1) * 6),
-        techLevel: clamp(30 + Math.log10(seed.gdp + 1) * 8 * superScale),
-        influence: clamp(Math.log10(seed.gdp + 1) * 8 * superScale),
+    countries.push({
+      id: countryId,
+      gameId,
+      iso3: seed.iso3,
+      name: seed.name,
+      capitalLng: seed.capital[0],
+      capitalLat: seed.capital[1],
+      isPlayer,
+      population: seed.population,
+      gdp: seed.gdp,
+      stability: clamp(45 + Math.log10(seed.gdp + 1) * 6),
+      techLevel: clamp(30 + Math.log10(seed.gdp + 1) * 8 * superScale),
+      influence: clamp(Math.log10(seed.gdp + 1) * 8 * superScale),
+      morale: 60,
+      infrastructure: clamp(40 + Math.log10(seed.gdp + 1) * 5),
+      money: seed.gdp * 0.05,
+      oil: seed.gdp * 0.01,
+      food: seed.population * 0.5,
+      electricity: seed.population * 0.4,
+      steel: seed.gdp * 0.005,
+      rareMaterials: seed.gdp * 0.001,
+      manpower: seed.population * 0.3,
+      aiAggression: seed.aggression ?? 40,
+      aiEconomyFocus: 50,
+      aiMilitaryFocus: seed.super ? 60 : 40,
+      aiDiplomacyPref: seed.super ? 45 : 60,
+      aiRiskTolerance: seed.super ? 55 : 40,
+    });
+
+    // Territories + their starting buildings.
+    let capitalTerritoryId: string | null = null;
+    for (const t of sectorsFor(seed)) {
+      const territoryId = randomUUID();
+      if (t.kind === "CAPITAL") capitalTerritoryId = territoryId;
+      territories.push({
+        id: territoryId,
+        countryId,
+        name: t.name,
+        kind: t.kind,
+        lng: t.lng,
+        lat: t.lat,
+        population: t.population,
+        originalOwner: seed.iso3,
+        defenses: t.kind === "CAPITAL" ? 30 : 10,
+        economy: 50,
         morale: 60,
-        infrastructure: clamp(40 + Math.log10(seed.gdp + 1) * 5),
-        // Starting stockpiles.
-        money: seed.gdp * 0.05,
-        oil: seed.gdp * 0.01,
-        food: seed.population * 0.5,
-        electricity: seed.population * 0.4,
-        steel: seed.gdp * 0.005,
-        rareMaterials: seed.gdp * 0.001,
-        manpower: seed.population * 0.3,
-        // AI personality.
-        aiAggression: seed.aggression ?? 40,
-        aiEconomyFocus: 50,
-        aiMilitaryFocus: seed.super ? 60 : 40,
-        aiDiplomacyPref: seed.super ? 45 : 60,
-        aiRiskTolerance: seed.super ? 55 : 40,
-        territories: { create: makeTerritories(seed) },
-      },
+        infrastructure: 50,
+      });
+      for (const b of startingBuildings(t.kind)) buildings.push({ territoryId, type: b.type, level: b.level });
+    }
+
+    // Starting army at the capital.
+    const armyId = randomUUID();
+    const infantry = Math.max(2, Math.floor(seed.gdp / 300) + 2);
+    const tanks = seed.super ? Math.floor(seed.gdp / 1500) + 1 : 0;
+    const armyUnits: { type: UnitType; count: number }[] = [{ type: "INFANTRY", count: infantry }];
+    if (tanks > 0) armyUnits.push({ type: "TANK", count: tanks });
+    armies.push({
+      id: armyId,
+      countryId,
+      name: "1st Army",
+      locationTerritoryId: capitalTerritoryId,
+      strength: forceStrength(armyUnits.map((u) => ({ ...u, health: 100 }))),
     });
+    for (const u of armyUnits) units.push({ armyId, type: u.type, count: u.count });
   }
 
-  await seedArmies(game.id);
-  await seedRivalries(game.id);
-  return game.id;
-}
-
-/** Give every country a starting army stationed at its capital. */
-async function seedArmies(gameId: string): Promise<void> {
-  const countries = await prisma.country.findMany({
-    where: { gameId },
-    include: { territories: { where: { kind: "CAPITAL" }, take: 1 } },
-  });
-  for (const c of countries) {
-    const capital = c.territories[0];
-    const infantry = Math.max(2, Math.floor(c.gdp / 300) + 2);
-    const tanks = c.influence > 30 ? Math.floor(c.gdp / 1500) + 1 : 0;
-    const units: { type: UnitType; count: number; health: number }[] = [
-      { type: "INFANTRY", count: infantry, health: 100 },
-    ];
-    if (tanks > 0) units.push({ type: "TANK", count: tanks, health: 100 });
-
-    await prisma.army.create({
-      data: {
-        countryId: c.id,
-        name: "1st Army",
-        locationTerritoryId: capital?.id ?? null,
-        strength: forceStrength(units.map((u) => ({ ...u, health: 100 }))),
-        units: { create: units.map((u) => ({ type: u.type, count: u.count })) },
-      },
-    });
-  }
-}
-
-/** Seed negative opinion between historic rivals present in this game. */
-async function seedRivalries(gameId: string): Promise<void> {
-  const countries = await prisma.country.findMany({ where: { gameId }, select: { id: true, iso3: true } });
-  const byIso = new Map(countries.map((c) => [c.iso3, c.id]));
+  // Rivalries (both directions) for pairs present in this game.
   for (const [a, b] of RIVALRIES) {
-    const aId = byIso.get(a);
-    const bId = byIso.get(b);
+    const aId = idByIso.get(a);
+    const bId = idByIso.get(b);
     if (!aId || !bId) continue;
-    for (const [from, to] of [[aId, bId], [bId, aId]] as const) {
-      await prisma.diplomaticRelation.create({ data: { fromId: from, toId: to, opinion: -50 } });
-    }
+    relations.push({ fromId: aId, toId: bId, opinion: -50 }, { fromId: bId, toId: aId, opinion: -50 });
   }
+
+  // Write everything in dependency order.
+  await prisma.game.create({
+    data: { id: gameId, playerCountry: playerIso, playerName, playerEmail, lastTickAt: new Date() },
+  });
+  await prisma.country.createMany({ data: countries });
+  await prisma.territory.createMany({ data: territories });
+  await prisma.building.createMany({ data: buildings });
+  await prisma.army.createMany({ data: armies });
+  await prisma.unit.createMany({ data: units });
+  if (relations.length) await prisma.diplomaticRelation.createMany({ data: relations });
+
+  return gameId;
 }
 
-function makeTerritories(seed: CountrySeed): Prisma.TerritoryCreateWithoutCountryInput[] {
-  const sectors = KNOWN_SECTORS[seed.iso3];
-  const list: Prisma.TerritoryCreateWithoutCountryInput[] = [];
+interface Sector {
+  name: string;
+  kind: TerritoryKind;
+  lng: number;
+  lat: number;
+  population: number;
+}
 
-  if (sectors) {
-    const each = seed.population / sectors.length;
-    for (const s of sectors) {
-      list.push(territory(s.name, s.kind as TerritoryKind, s.lng, s.lat, each, seed.iso3, s.kind === "CAPITAL"));
-    }
-  } else {
-    // Procedural sectors fanned around the capital.
-    const n = seed.population > 100 ? 5 : seed.population > 20 ? 4 : 3;
-    const each = seed.population / n;
-    list.push(territory(`${seed.name} Capital`, "CAPITAL", seed.capital[0], seed.capital[1], each, seed.iso3, true));
-    const kinds: TerritoryKind[] = ["MAJOR_CITY", "INDUSTRIAL", "PORT", "RURAL"];
-    for (let i = 1; i < n; i++) {
-      const ang = (i / n) * Math.PI * 2;
-      list.push(
-        territory(
-          `${seed.name} Region ${i}`,
-          kinds[(i - 1) % kinds.length],
-          seed.capital[0] + Math.cos(ang) * 2.5,
-          seed.capital[1] + Math.sin(ang) * 2.0,
-          each,
-          seed.iso3,
-          false
-        )
-      );
-    }
+function sectorsFor(seed: CountrySeed): Sector[] {
+  const known = KNOWN_SECTORS[seed.iso3];
+  if (known) {
+    const each = seed.population / known.length;
+    return known.map((s) => ({ name: s.name, kind: s.kind as TerritoryKind, lng: s.lng, lat: s.lat, population: each }));
   }
-  return list;
+  // Procedural sectors fanned around the capital.
+  const n = seed.population > 100 ? 5 : seed.population > 20 ? 4 : 3;
+  const each = seed.population / n;
+  const out: Sector[] = [
+    { name: `${seed.name} Capital`, kind: "CAPITAL", lng: seed.capital[0], lat: seed.capital[1], population: each },
+  ];
+  const kinds: TerritoryKind[] = ["MAJOR_CITY", "INDUSTRIAL", "PORT", "RURAL"];
+  for (let i = 1; i < n; i++) {
+    const ang = (i / n) * Math.PI * 2;
+    out.push({
+      name: `${seed.name} Region ${i}`,
+      kind: kinds[(i - 1) % kinds.length],
+      lng: seed.capital[0] + Math.cos(ang) * 2.5,
+      lat: seed.capital[1] + Math.sin(ang) * 2.0,
+      population: each,
+    });
+  }
+  return out;
 }
 
-function territory(
-  name: string,
-  kind: TerritoryKind,
-  lng: number,
-  lat: number,
-  population: number,
-  owner: string,
-  isCapital: boolean
-): Prisma.TerritoryCreateWithoutCountryInput {
-  return {
-    name,
-    kind,
-    lng,
-    lat,
-    population,
-    originalOwner: owner,
-    defenses: isCapital ? 30 : 10,
-    economy: 50,
-    morale: 60,
-    infrastructure: 50,
-    buildings: {
-      create: startingBuildings(kind),
-    },
-  };
-}
-
-function startingBuildings(kind: TerritoryKind): Prisma.BuildingCreateWithoutTerritoryInput[] {
-  const base: Prisma.BuildingCreateWithoutTerritoryInput[] = [
-    { type: "HOUSING", level: 2 },
-    { type: "FARM", level: 1 },
+function startingBuildings(kind: TerritoryKind): { type: Prisma.BuildingCreateManyInput["type"]; level: number }[] {
+  const base = [
+    { type: "HOUSING" as const, level: 2 },
+    { type: "FARM" as const, level: 1 },
   ];
   switch (kind) {
     case "CAPITAL":
