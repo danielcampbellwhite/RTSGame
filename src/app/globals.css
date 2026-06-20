@@ -1,0 +1,66 @@
+@import "tailwindcss";
+@import "maplibre-gl/dist/maplibre-gl.css";
+
+:root {
+  --wd-bg: #04060a;
+  --wd-panel: #0a0f1a;
+  --wd-border: #14304a;
+  --wd-cyan: #22d3ee;
+  --wd-magenta: #f0f;
+  --wd-amber: #fbbf24;
+  --wd-red: #ef4444;
+  --wd-green: #34d399;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+  background: var(--wd-bg);
+  color: #cbe7f5;
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  overflow: hidden;
+}
+
+.neon-text {
+  text-shadow: 0 0 6px currentColor;
+}
+
+.panel {
+  background: linear-gradient(180deg, rgba(10, 15, 26, 0.92), rgba(4, 6, 10, 0.92));
+  border: 1px solid var(--wd-border);
+  backdrop-filter: blur(6px);
+}
+
+.glow-border {
+  box-shadow: 0 0 12px rgba(34, 211, 238, 0.25), inset 0 0 12px rgba(34, 211, 238, 0.08);
+}
+
+/* Thin neon scrollbars for the panels & feed. */
+.scroll-thin::-webkit-scrollbar {
+  width: 6px;
+}
+.scroll-thin::-webkit-scrollbar-thumb {
+  background: var(--wd-border);
+  border-radius: 3px;
+}
+
+@keyframes pulse-dot {
+  0%,
+  100% {
+    opacity: 0.5;
+    transform: scale(0.9);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.15);
+  }
+}
+.pulse {
+  animation: pulse-dot 2s ease-in-out infinite;
+}
+
+.maplibregl-ctrl-attrib,
+.maplibregl-ctrl-logo {
+  opacity: 0.4;
+}
