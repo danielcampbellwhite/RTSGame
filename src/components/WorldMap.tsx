@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import type { Map as MlMap, GeoJSONSource } from "maplibre-gl";
+import type { Map as MlMap, GeoJSONSource, Popup } from "maplibre-gl";
 import { useGameStore } from "@/store/game";
 import type { WorldSnapshot } from "@/lib/snapshot";
 
@@ -119,6 +119,8 @@ function armyPoints(s: WorldSnapshot): GeoJSON.FeatureCollection {
 export default function WorldMap() {
   const ref = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MlMap | null>(null);
+  const popupRef = useRef<Popup | null>(null);
+  const nameToIso = useRef<Map<string, string>>(new Map());
   const snapshot = useGameStore((s) => s.snapshot);
   const selectCountry = useGameStore((s) => s.selectCountry);
   const selectTerritory = useGameStore((s) => s.selectTerritory);
@@ -244,6 +246,27 @@ export default function WorldMap() {
           map.on("mouseenter", layer, () => (map.getCanvas().style.cursor = "pointer"));
           map.on("mouseleave", layer, () => (map.getCanvas().style.cursor = ""));
         }
+
+        // Click any landmass to select that nation (if it's in the game).
+        map.on("click", "world-fill", (e) => {
+          const name = e.features?.[0]?.properties?.name as string | undefined;
+          const iso = name ? nameToIso.current.get(name) : undefined;
+          if (iso) selectCountry(iso);
+        });
+
+        // Hover label for country names (DOM popup — no font glyphs needed).
+        const popup = new maplibregl.Popup({ closeButton: false, closeOnClick: false, className: "wd-popup", offset: 8 });
+        popupRef.current = popup;
+        map.on("mousemove", "world-fill", (e) => {
+          const name = e.features?.[0]?.properties?.name as string | undefined;
+          if (!name) return;
+          map.getCanvas().style.cursor = nameToIso.current.has(name) ? "pointer" : "";
+          popup.setLngLat(e.lngLat).setHTML(`<span>${name}</span>`).addTo(map);
+        });
+        map.on("mouseleave", "world-fill", () => {
+          map.getCanvas().style.cursor = "";
+          popup.remove();
+        });
       });
     })();
 
@@ -258,6 +281,16 @@ export default function WorldMap() {
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !snapshot) return;
+
+    // Map world-atlas country names back to our iso3 (including aliases).
+    const m = new Map<string, string>();
+    for (const c of snapshot.countries) {
+      m.set(c.name, c.iso3);
+      const alias = NAME_ALIAS[c.name];
+      if (alias) m.set(alias, c.iso3);
+    }
+    nameToIso.current = m;
+
     const apply = () => {
       (map.getSource("countries") as GeoJSONSource | undefined)?.setData(countryPoints(snapshot));
       (map.getSource("territories") as GeoJSONSource | undefined)?.setData(territoryPoints(snapshot));

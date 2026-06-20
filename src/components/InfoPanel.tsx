@@ -110,8 +110,14 @@ function PolicyTab({ snapshot }: { snapshot: WorldSnapshot }) {
     </label>
   );
 
+  const r = snapshot.rankings;
   return (
     <div className="space-y-1">
+      <div className="mb-1 grid grid-cols-3 gap-1 text-center text-[10px]">
+        <Rank label="GDP" rank={r.gdp} total={r.total} />
+        <Rank label="Influence" rank={r.influence} total={r.total} />
+        <Rank label="Territory" rank={r.territory} total={r.total} />
+      </div>
       {slider("taxRate", "Tax Rate")}
       {slider("militaryBudgetPct", "Military")}
       {slider("welfareBudgetPct", "Welfare")}
@@ -503,4 +509,16 @@ function Bar({ label, value, pct, danger }: { label: string; value: string; pct?
 
 function Empty({ children }: { children: React.ReactNode }) {
   return <div className="text-[11px] text-cyan-200/30">{children}</div>;
+}
+
+function Rank({ label, rank, total }: { label: string; rank: number; total: number }) {
+  return (
+    <div className="rounded border border-[var(--wd-border)] py-1">
+      <div className="uppercase tracking-widest text-cyan-200/40">{label}</div>
+      <div className="neon-text text-[var(--wd-cyan)]">
+        #{rank}
+        <span className="text-cyan-200/40">/{total}</span>
+      </div>
+    </div>
+  );
 }

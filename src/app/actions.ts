@@ -83,6 +83,26 @@ export async function queueBuilding(gameId: string, territoryId: string, type: B
   return getWorldSnapshot(gameId);
 }
 
+// ── TIME CONTROL ─────────────────────────────────────────────────────────────
+export async function setPaused(gameId: string, paused: boolean) {
+  if (paused) {
+    await catchUp(gameId); // settle the world, then freeze it
+    await prisma.game.update({ where: { id: gameId }, data: { paused: true } });
+  } else {
+    // Resume from "now" so the paused interval isn't simulated.
+    await prisma.game.update({ where: { id: gameId }, data: { paused: false, lastTickAt: new Date() } });
+  }
+  revalidatePath("/");
+  return getWorldSnapshot(gameId);
+}
+
+export async function setSpeed(gameId: string, speed: number) {
+  await catchUp(gameId);
+  await prisma.game.update({ where: { id: gameId }, data: { speed: Math.max(0.5, Math.min(10, speed)) } });
+  revalidatePath("/");
+  return getWorldSnapshot(gameId);
+}
+
 // ── MILITARY ───────────────────────────────────────────────────────────────
 export async function recruitUnit(gameId: string, type: UnitType, count: number) {
   await catchUp(gameId);

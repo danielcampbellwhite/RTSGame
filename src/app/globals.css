@@ -64,3 +64,17 @@ body {
 .maplibregl-ctrl-logo {
   opacity: 0.4;
 }
+
+/* Neon hover label */
+.wd-popup .maplibregl-popup-content {
+  background: rgba(4, 6, 10, 0.9);
+  border: 1px solid var(--wd-border);
+  color: var(--wd-cyan);
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  box-shadow: 0 0 8px rgba(34, 211, 238, 0.3);
+}
+.wd-popup .maplibregl-popup-tip {
+  display: none;
+}

@@ -8,6 +8,10 @@ import { COUNTRIES } from "@/data/countries";
 import ResourceBar from "@/components/ResourceBar";
 import InfoPanel from "@/components/InfoPanel";
 import EventFeed from "@/components/EventFeed";
+import TimeControl from "@/components/TimeControl";
+import Onboarding from "@/components/Onboarding";
+
+const ONBOARD_KEY = "wd_onboarded";
 
 const WorldMap = dynamic(() => import("@/components/WorldMap"), { ssr: false });
 
@@ -21,11 +25,24 @@ export default function Page() {
   const [gameId, setGameId] = useState<string | null>(null);
   const [booting, setBooting] = useState(true);
   const [mobileTab, setMobileTab] = useState<"map" | "info" | "feed">("map");
+  const [showOnboarding, setShowOnboarding] = useState(false);
 
   // Tapping something on the map should reveal the control sheet on mobile.
   useEffect(() => {
     if (selectedTerritoryId || selectedCountryIso) setMobileTab("info");
   }, [selectedTerritoryId, selectedCountryIso]);
+
+  // Show the intro once per browser the first time a world is loaded.
+  useEffect(() => {
+    if (snapshot && typeof window !== "undefined" && !localStorage.getItem(ONBOARD_KEY)) {
+      setShowOnboarding(true);
+    }
+  }, [snapshot]);
+
+  const closeOnboarding = () => {
+    localStorage.setItem(ONBOARD_KEY, "1");
+    setShowOnboarding(false);
+  };
 
   // Resolve the active game (from localStorage) on mount.
   useEffect(() => {
@@ -76,12 +93,26 @@ export default function Page() {
 
   return (
     <div className="flex h-[100dvh] w-screen flex-col gap-2 p-2">
-      <ResourceBar />
+      {showOnboarding && <Onboarding onClose={closeOnboarding} />}
+
+      <div className="flex shrink-0 gap-2">
+        <TimeControl />
+        <div className="min-w-0 flex-1">
+          <ResourceBar />
+        </div>
+      </div>
 
       <div className="relative flex min-h-0 flex-1 flex-col gap-2 md:grid md:grid-cols-[1fr_340px] md:grid-rows-[minmax(0,1fr)_7rem]">
         {/* Map */}
         <div className="panel glow-border relative min-h-0 flex-1 overflow-hidden md:col-start-1 md:row-start-1">
           <WorldMap />
+          <button
+            onClick={() => setShowOnboarding(true)}
+            className="panel absolute bottom-2 right-2 z-10 h-7 w-7 rounded-full text-sm text-cyan-200/70 hover:text-[var(--wd-cyan)]"
+            title="Help"
+          >
+            ?
+          </button>
         </div>
 
         {/* Control panel — desktop top-right, mobile slide-up sheet */}

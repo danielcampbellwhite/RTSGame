@@ -37,7 +37,10 @@ export async function catchUp(gameId: string, now: Date = new Date()): Promise<v
   const game = await prisma.game.findUnique({ where: { id: gameId } });
   if (!game || game.paused) return;
 
-  const elapsedMs = now.getTime() - game.lastTickAt.getTime();
+  // The player's chosen speed multiplies how much simulation time elapses per
+  // real second. Pause is handled above by skipping (and the unpause action
+  // resets lastTickAt so paused wall-clock time is never simulated).
+  const elapsedMs = (now.getTime() - game.lastTickAt.getTime()) * (game.speed || 1);
   if (elapsedMs < TICK.stepMs) return;
 
   const steps = Math.min(Math.floor(elapsedMs / TICK.stepMs), TICK.maxSteps);

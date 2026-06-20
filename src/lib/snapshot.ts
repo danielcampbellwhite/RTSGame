@@ -80,6 +80,8 @@ export interface ResearchView {
 
 export interface WorldSnapshot {
   gameId: string;
+  game: { ageDays: number; paused: boolean; speed: number };
+  rankings: { gdp: number; influence: number; territory: number; total: number };
   player: {
     id: string;
     iso3: string;
@@ -154,6 +156,17 @@ export async function getWorldSnapshot(gameId: string): Promise<WorldSnapshot | 
 
   const takenTech = new Set(research.map((r) => r.techKey));
 
+  // Player standing among living nations.
+  const alive = countries.filter((c) => c.isAlive);
+  const rankBy = (val: (c: (typeof alive)[number]) => number) =>
+    1 + alive.filter((c) => val(c) > val(player)).length;
+  const rankings = {
+    gdp: rankBy((c) => c.gdp),
+    influence: rankBy((c) => c.influence),
+    territory: rankBy((c) => c.territories.length),
+    total: alive.length,
+  };
+
   // War targets: each enemy's capital sector, for "attack" orders & map markers.
   const warTargets: WorldSnapshot["warTargets"] = [];
   for (const w of wars) {
@@ -178,6 +191,12 @@ export async function getWorldSnapshot(gameId: string): Promise<WorldSnapshot | 
 
   return {
     gameId,
+    game: {
+      ageDays: (Date.now() - game.createdAt.getTime()) / 86_400_000,
+      paused: game.paused,
+      speed: game.speed,
+    },
+    rankings,
     player: {
       id: player.id,
       iso3: player.iso3,
