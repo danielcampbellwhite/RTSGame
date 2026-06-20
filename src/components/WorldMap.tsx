@@ -13,25 +13,6 @@ const DARK_STYLE = {
   layers: [{ id: "bg", type: "background" as const, paint: { "background-color": "#04060a" } }],
 };
 
-function graticule(): GeoJSON.FeatureCollection {
-  const features: GeoJSON.Feature[] = [];
-  for (let lng = -180; lng <= 180; lng += 20) {
-    features.push({
-      type: "Feature",
-      properties: {},
-      geometry: { type: "LineString", coordinates: [[lng, -85], [lng, 85]] },
-    });
-  }
-  for (let lat = -80; lat <= 80; lat += 20) {
-    features.push({
-      type: "Feature",
-      properties: {},
-      geometry: { type: "LineString", coordinates: [[-180, lat], [180, lat]] },
-    });
-  }
-  return { type: "FeatureCollection", features };
-}
-
 function countryPoints(s: WorldSnapshot): GeoJSON.FeatureCollection {
   return {
     type: "FeatureCollection",
@@ -138,7 +119,6 @@ export default function WorldMap() {
   const toRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [msg, setMsg] = useState("");
-  const [dims, setDims] = useState({ w: 0, h: 0 });
   const snapshot = useGameStore((s) => s.snapshot);
   const selectCountry = useGameStore((s) => s.selectCountry);
   const selectTerritory = useGameStore((s) => s.selectTerritory);
@@ -174,16 +154,9 @@ export default function WorldMap() {
 
       // MapLibre can init before the flex container has its final size; keep the
       // canvas in sync so the map is never rendered into a zero-height box.
-      const measure = () => {
-        if (ref.current) setDims({ w: ref.current.clientWidth, h: ref.current.clientHeight });
-      };
-      const ro = new ResizeObserver(() => {
-        mapRef.current?.resize();
-        measure();
-      });
+      const ro = new ResizeObserver(() => mapRef.current?.resize());
       if (ref.current) ro.observe(ref.current);
       roRef.current = ro;
-      measure();
 
       // If the load event never fires, surface it rather than spinning forever.
       toRef.current = setTimeout(() => {
@@ -199,7 +172,6 @@ export default function WorldMap() {
       map.on("load", () => {
         if (toRef.current) clearTimeout(toRef.current);
         map.resize();
-        measure();
         setStatus("ready");
         // Real world landmasses + neon country borders (token-free static GeoJSON).
         map.addSource("world", { type: "geojson", data: "/world.geojson" });
@@ -221,14 +193,6 @@ export default function WorldMap() {
           type: "line",
           source: "world",
           paint: { "line-color": "#22d3ee", "line-width": 0.8, "line-opacity": 0.7 },
-        });
-
-        map.addSource("grid", { type: "geojson", data: graticule() });
-        map.addLayer({
-          id: "grid",
-          type: "line",
-          source: "grid",
-          paint: { "line-color": "#22d3ee", "line-width": 0.4, "line-opacity": 0.12 },
         });
 
         map.addSource("countries", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
@@ -376,11 +340,6 @@ export default function WorldMap() {
           </span>
         </div>
       )}
-      {/* Diagnostic badge — read this off to report map status + canvas size. */}
-      <div className="pointer-events-none absolute bottom-1 left-1 z-10 rounded bg-black/60 px-1.5 py-0.5 text-[9px] text-cyan-200/70">
-        map: {status} · {dims.w}×{dims.h}
-        {status === "error" && msg ? ` · ${msg}` : ""}
-      </div>
     </>
   );
 }

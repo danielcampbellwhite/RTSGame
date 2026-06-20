@@ -166,8 +166,12 @@ export default function Page() {
 
   return (
     <div
-      style={{ height: vh ? `${vh}px` : "100vh" }}
-      className="grid w-screen grid-rows-[auto_1fr_auto] gap-2 overflow-hidden p-2"
+      style={{
+        height: vh ? `${vh}px` : "100vh",
+        paddingTop: "calc(0.5rem + env(safe-area-inset-top))",
+        paddingBottom: "calc(0.5rem + env(safe-area-inset-bottom))",
+      }}
+      className="grid w-screen grid-rows-[auto_1fr_auto] gap-2 overflow-hidden px-2"
     >
       {showOnboarding && <Onboarding onClose={closeOnboarding} />}
 
@@ -209,7 +213,7 @@ export default function Page() {
           <button
             key={t}
             onClick={() => setMobileTab(t)}
-            className={`panel relative flex-1 rounded py-2 text-[11px] uppercase tracking-widest ${
+            className={`panel relative flex-1 rounded py-3 text-xs uppercase tracking-widest ${
               mobileTab === t ? "text-[var(--wd-cyan)] glow-border" : "text-cyan-200/50"
             }`}
           >
