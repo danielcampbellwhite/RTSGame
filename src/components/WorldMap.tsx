@@ -297,7 +297,9 @@ export default function WorldMap() {
   const regionsRef = useRef<GeoJSON.Feature[]>([]);
   const regionsGameRef = useRef<string | null>(null);
   const snapshotRef = useRef<WorldSnapshot | null>(null);
+  const centeredGameRef = useRef<string | null>(null);
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
+  const [centered, setCentered] = useState(false);
   const [msg, setMsg] = useState("");
   const snapshot = useGameStore((s) => s.snapshot);
   const selectedTerritoryId = useGameStore((s) => s.selectedTerritoryId);
@@ -443,6 +445,14 @@ export default function WorldMap() {
         });
 
         map.addLayer({ id: "world-border", type: "line", source: "world", paint: { "line-color": "#22d3ee", "line-width": 0.7, "line-opacity": 0.5 } });
+        // Player country highlight outline.
+        map.addLayer({
+          id: "player-outline",
+          type: "line",
+          source: "world",
+          paint: { "line-color": "#34d399", "line-width": 2.4, "line-blur": 2, "line-opacity": 0.9 },
+          filter: ["==", ["get", "name"], "__none__"],
+        });
 
         map.addSource("zones", { type: "geojson", data: empty });
         map.addLayer({
@@ -547,6 +557,27 @@ export default function WorldMap() {
             return new gl.Marker({ element: el, anchor: "center" }).setLngLat([c.lng, c.lat]).addTo(map);
           });
       }
+      if (map.getLayer("player-outline")) {
+        map.setFilter("player-outline", ["in", ["get", "name"], ["literal", expandNames([snapshot.player.name])]]);
+      }
+
+      // On first load of a game, frame the player's nation and reveal the map.
+      if (centeredGameRef.current !== snapshot.gameId) {
+        const zs = snapshot.territories;
+        if (zs.length) {
+          let minX = 180, minY = 90, maxX = -180, maxY = -90;
+          for (const t of zs) {
+            if (t.lng < minX) minX = t.lng;
+            if (t.lng > maxX) maxX = t.lng;
+            if (t.lat < minY) minY = t.lat;
+            if (t.lat > maxY) maxY = t.lat;
+          }
+          map.fitBounds([[minX, minY], [maxX, maxY]], { padding: 60, maxZoom: 4.5, duration: 800 });
+        }
+        centeredGameRef.current = snapshot.gameId;
+        setCentered(true);
+      }
+
       refreshZones();
     };
     if (map.isStyleLoaded()) apply();
@@ -567,13 +598,21 @@ export default function WorldMap() {
     else map.once("idle", set);
   }, [highlightedZoneId, selectedTerritoryId, snapshot]);
 
+  const loading = status !== "ready" || !centered;
   return (
     <>
       <div ref={ref} className="h-full w-full" />
-      {status !== "ready" && (
-        <div className="pointer-events-none absolute left-0 top-0 z-10 flex h-full w-full items-center justify-center p-4 text-center text-xs">
-          <span className={status === "error" ? "text-[var(--wd-red)]" : "pulse text-cyan-200/80"}>
-            {status === "error" ? `Map failed to load: ${msg}` : "Loading map…"}
+      {loading && (
+        <div className="absolute left-0 top-0 z-10 flex h-full w-full flex-col items-center justify-center gap-3 bg-[#04060a] p-4 text-center text-xs">
+          {status !== "error" && (
+            <div className="h-8 w-8 animate-spin rounded-full border-2 border-[var(--wd-border)] border-t-[var(--wd-cyan)]" />
+          )}
+          <span className={status === "error" ? "text-[var(--wd-red)]" : "text-cyan-200/80"}>
+            {status === "error"
+              ? `Map failed to load: ${msg}`
+              : status !== "ready"
+                ? "Loading map…"
+                : "Locating your nation…"}
           </span>
         </div>
       )}
