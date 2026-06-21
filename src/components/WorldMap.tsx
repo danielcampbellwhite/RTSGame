@@ -143,6 +143,10 @@ export default function WorldMap() {
         attributionControl: false,
         maxZoom: 7,
         minZoom: 1,
+        // Don't repeat the world horizontally — avoids vertical seam artifacts.
+        renderWorldCopies: false,
+        // Smoother edges; reduces stray line artifacts on some mobile GPUs.
+        canvasContextAttributes: { antialias: true },
       });
       mapRef.current = map;
       map.on("error", (e) => {
@@ -154,7 +158,19 @@ export default function WorldMap() {
 
       // MapLibre can init before the flex container has its final size; keep the
       // canvas in sync so the map is never rendered into a zero-height box.
-      const ro = new ResizeObserver(() => mapRef.current?.resize());
+      // Only resize on a real dimension change — resizing on every observer
+      // tick can leave streak artifacts in the WebGL framebuffer.
+      let lastW = 0;
+      let lastH = 0;
+      const ro = new ResizeObserver(() => {
+        if (!ref.current || !mapRef.current) return;
+        const w = ref.current.clientWidth;
+        const h = ref.current.clientHeight;
+        if (w === lastW && h === lastH) return;
+        lastW = w;
+        lastH = h;
+        mapRef.current.resize();
+      });
       if (ref.current) ro.observe(ref.current);
       roRef.current = ro;
 

@@ -35,13 +35,20 @@ export default function Page() {
   // dvh units or the `inset` shorthand, which some browsers don't support.
   const [vh, setVh] = useState<number | null>(null);
   useEffect(() => {
-    const update = () => setVh(window.innerHeight);
+    // visualViewport reflects the truly visible area (excludes the browser's
+    // URL/toolbar), so the bottom tab bar is never pushed off-screen.
+    const vv = typeof window !== "undefined" ? window.visualViewport : null;
+    const update = () => setVh(Math.round(vv?.height ?? window.innerHeight));
     update();
     window.addEventListener("resize", update);
     window.addEventListener("orientationchange", update);
+    vv?.addEventListener("resize", update);
+    vv?.addEventListener("scroll", update);
     return () => {
       window.removeEventListener("resize", update);
       window.removeEventListener("orientationchange", update);
+      vv?.removeEventListener("resize", update);
+      vv?.removeEventListener("scroll", update);
     };
   }, []);
 
