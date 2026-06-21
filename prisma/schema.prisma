@@ -258,6 +258,7 @@ model Fleet {
   strength Float @default(0)
   morale   Float @default(70)
   supply   Float @default(100)
+  strikeReadyAt DateTime?
 
   units Unit[]
 

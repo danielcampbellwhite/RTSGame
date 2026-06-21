@@ -55,6 +55,7 @@ export async function catchUp(gameId: string, now: Date = new Date()): Promise<v
     where: { country: { gameId } },
     include: { units: true },
   })) as SimArmy[];
+  const fleets = await prisma.fleet.findMany({ where: { country: { gameId } }, include: { units: true } });
   const routes: TradeRoute[] = await prisma.tradeRoute.findMany({ where: { from: { gameId } } });
   const research: ResearchProject[] = await prisma.researchProject.findMany({
     where: { country: { gameId }, completed: false },
@@ -69,6 +70,19 @@ export async function catchUp(gameId: string, now: Date = new Date()): Promise<v
   for (const a of armies) {
     a.strength = forceStrength(a.units);
     forceByCountry.set(a.countryId, (forceByCountry.get(a.countryId) ?? 0) + a.strength);
+  }
+  // Fleets: recompute strength (for upkeep) and resolve sea movement arrivals.
+  for (const f of fleets) {
+    f.strength = forceStrength(f.units);
+    forceByCountry.set(f.countryId, (forceByCountry.get(f.countryId) ?? 0) + f.strength);
+    if (f.state === "MOVING" && f.arrivesAt && f.arrivesAt.getTime() <= now.getTime()) {
+      f.lng = f.targetLng ?? f.lng;
+      f.lat = f.targetLat ?? f.lat;
+      f.targetLng = null;
+      f.targetLat = null;
+      f.arrivesAt = null;
+      f.state = "IDLE";
+    }
   }
 
   const events: Prisma.GameEventCreateManyInput[] = [];
@@ -171,6 +185,12 @@ export async function catchUp(gameId: string, now: Date = new Date()): Promise<v
     ),
     ...armies.flatMap((a) =>
       a.units.map((u) => prisma.unit.update({ where: { id: u.id }, data: { health: clamp(u.health) } }))
+    ),
+    ...fleets.map((f) =>
+      prisma.fleet.update({
+        where: { id: f.id },
+        data: { strength: f.strength, state: f.state, lng: f.lng, lat: f.lat, targetLng: f.targetLng, targetLat: f.targetLat, arrivesAt: f.arrivesAt },
+      })
     ),
     ...research.map((r) => prisma.researchProject.update({ where: { id: r.id }, data: { progress: clamp(r.progress) } })),
     ...completedTech.map((id) =>

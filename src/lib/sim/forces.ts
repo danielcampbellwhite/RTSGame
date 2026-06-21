@@ -90,6 +90,46 @@ export async function recruitAt(countryId: string, territoryId: string, type: Un
   return true;
 }
 
+/** Recruit a naval unit into the country's fleet (created at the port zone if new). */
+export async function recruitNaval(countryId: string, zoneId: string, type: UnitType, count: number): Promise<boolean> {
+  const stat = UNIT_STATS[type];
+  const [country, terr] = await Promise.all([
+    prisma.country.findUnique({ where: { id: countryId } }),
+    prisma.territory.findUnique({ where: { id: zoneId } }),
+  ]);
+  if (!country || !terr) return false;
+  const money = stat.moneyCost * count;
+  const manpower = stat.manpowerCost * count;
+  if (country.money < money || country.manpower < manpower) return false;
+
+  let fleet = await prisma.fleet.findFirst({ where: { countryId }, include: { units: true } });
+  if (!fleet) {
+    fleet = await prisma.fleet.create({ data: { countryId, name: "Fleet", lng: terr.lng, lat: terr.lat }, include: { units: true } });
+  }
+  const existing = fleet.units.find((u) => u.type === type);
+  if (existing) await prisma.unit.update({ where: { id: existing.id }, data: { count: existing.count + count } });
+  else await prisma.unit.create({ data: { fleetId: fleet.id, type, count } });
+
+  await prisma.country.update({ where: { id: countryId }, data: { money: country.money - money, manpower: country.manpower - manpower } });
+  const units = await prisma.unit.findMany({ where: { fleetId: fleet.id } });
+  await prisma.fleet.update({ where: { id: fleet.id }, data: { strength: forceStrength(units) } });
+  return true;
+}
+
+/** Sail a fleet toward a coordinate (slow, distance-based). */
+export async function sailFleet(fleetId: string, lng: number, lat: number): Promise<boolean> {
+  const fleet = await prisma.fleet.findUnique({ where: { id: fleetId } });
+  if (!fleet) return false;
+  const km = haversineKm(fleet.lng, fleet.lat, lng, lat);
+  // ~35 km/h cruising; ships are slow — days for long crossings.
+  const ms = Math.max(2 * 3_600_000, (km / 35) * 3_600_000);
+  await prisma.fleet.update({
+    where: { id: fleetId },
+    data: { state: "MOVING", targetLng: lng, targetLat: lat, arrivesAt: new Date(Date.now() + ms) },
+  });
+  return true;
+}
+
 /** Order an army to move toward a target territory; sets arrival time by distance. */
 export async function orderMove(armyId: string, targetTerritoryId: string): Promise<boolean> {
   const army = await prisma.army.findUnique({ where: { id: armyId } });

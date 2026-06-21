@@ -48,6 +48,17 @@ export interface ArmyView {
   units: { type: string; count: number; health: number }[];
 }
 
+export interface FleetView {
+  id: string;
+  name: string;
+  lng: number;
+  lat: number;
+  state: string;
+  strength: number;
+  strikeReadyAt: string | null;
+  units: { type: string; count: number }[];
+}
+
 export interface RelationView {
   iso3: string;
   name: string;
@@ -128,6 +139,7 @@ export interface WorldSnapshot {
   // Enemy units currently within your vision range.
   enemyUnits: { lng: number; lat: number; type: string; ownerIso: string }[];
   armies: ArmyView[];
+  fleets: FleetView[];
   relations: RelationView[];
   wars: WarView[];
   warTargets: WarTargetView[];
@@ -164,8 +176,9 @@ export async function getWorldSnapshot(gameId: string): Promise<WorldSnapshot | 
     orderBy: { population: "desc" },
   });
 
-  const [armies, relations, wars, tradeRoutes, research] = await Promise.all([
+  const [armies, fleets, relations, wars, tradeRoutes, research] = await Promise.all([
     prisma.army.findMany({ where: { countryId: player.id }, include: { units: true } }),
+    prisma.fleet.findMany({ where: { countryId: player.id }, include: { units: true } }),
     prisma.diplomaticRelation.findMany({ where: { fromId: player.id }, include: { to: true } }),
     prisma.war.findMany({
       where: { gameId, status: "ACTIVE", participants: { some: { countryId: player.id } } },
@@ -353,6 +366,16 @@ export async function getWorldSnapshot(gameId: string): Promise<WorldSnapshot | 
       locationTerritoryId: a.locationTerritoryId,
       strikeReadyAt: a.strikeReadyAt ? a.strikeReadyAt.toISOString() : null,
       units: a.units.map((u) => ({ type: u.type, count: u.count, health: u.health })),
+    })),
+    fleets: fleets.map((f) => ({
+      id: f.id,
+      name: f.name,
+      lng: f.lng,
+      lat: f.lat,
+      state: f.state,
+      strength: f.strength,
+      strikeReadyAt: f.strikeReadyAt ? f.strikeReadyAt.toISOString() : null,
+      units: f.units.map((u) => ({ type: u.type, count: u.count })),
     })),
     relations: relations.map((r) => ({
       iso3: r.to.iso3,

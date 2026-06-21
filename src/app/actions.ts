@@ -7,7 +7,7 @@ import { getWorldSnapshot, type WorldSnapshot } from "@/lib/snapshot";
 import { DIPLOMACY, STRIKE } from "@/lib/balance";
 import { buildingCost, buildingDurationMs } from "@/lib/buildings";
 import { UNIT_STATS, maxRange, forceStrength } from "@/lib/units";
-import { recruit, orderMove, recruitAt } from "@/lib/sim/forces";
+import { recruit, orderMove, recruitAt, recruitNaval, sailFleet } from "@/lib/sim/forces";
 import { startResearchProject } from "@/lib/sim/research";
 import { declareWar as declareWarCore, endWar, adjustOpinion, setFlags } from "@/lib/sim/diplomacy";
 import type { BuildingType, UnitType, TradeGood } from "@prisma/client";
@@ -197,6 +197,57 @@ export async function strikeZone(gameId: string, armyId: string, targetZoneId: s
       severity: 2,
     },
   });
+  revalidatePath("/");
+  return getWorldSnapshot(gameId);
+}
+
+// ── NAVAL ────────────────────────────────────────────────────────────────────
+export async function recruitNavalAtZone(gameId: string, zoneId: string, type: UnitType, count: number) {
+  await catchUp(gameId);
+  const p = await player(gameId);
+  if (!p) return getWorldSnapshot(gameId);
+  const terr = await prisma.territory.findUnique({ where: { id: zoneId }, include: { buildings: true } });
+  if (!terr || terr.countryId !== p.id) return getWorldSnapshot(gameId);
+  const port = terr.buildings.some((b) => (b.type === "NAVAL_BASE" || b.type === "PORT") && b.level >= 1);
+  if (!port) {
+    await prisma.gameEvent.create({
+      data: { gameId, scope: "COUNTRY", category: "SYSTEM", title: `${terr.name} needs a Naval Base or Port to build ships`, countryIso: p.iso3, severity: 2 },
+    });
+    return getWorldSnapshot(gameId);
+  }
+  await recruitNaval(p.id, zoneId, type, count);
+  revalidatePath("/");
+  return getWorldSnapshot(gameId);
+}
+
+export async function sailFleetToZone(gameId: string, fleetId: string, zoneId: string) {
+  await catchUp(gameId);
+  const p = await player(gameId);
+  const fleet = await prisma.fleet.findUnique({ where: { id: fleetId } });
+  const zone = await prisma.territory.findUnique({ where: { id: zoneId } });
+  if (p && fleet && fleet.countryId === p.id && zone) await sailFleet(fleetId, zone.lng, zone.lat);
+  revalidatePath("/");
+  return getWorldSnapshot(gameId);
+}
+
+export async function fleetStrike(gameId: string, fleetId: string, zoneId: string) {
+  await catchUp(gameId);
+  const p = await player(gameId);
+  if (!p) return getWorldSnapshot(gameId);
+  const fleet = await prisma.fleet.findFirst({ where: { id: fleetId, countryId: p.id }, include: { units: true } });
+  if (!fleet) return getWorldSnapshot(gameId);
+  if (fleet.strikeReadyAt && fleet.strikeReadyAt.getTime() > Date.now()) return getWorldSnapshot(gameId);
+  const target = await prisma.territory.findUnique({ where: { id: zoneId } });
+  if (!target || target.countryId === p.id) return getWorldSnapshot(gameId);
+  const range = maxRange(fleet.units);
+  if (Math.hypot(target.lng - fleet.lng, target.lat - fleet.lat) > range) {
+    await prisma.gameEvent.create({ data: { gameId, scope: "COUNTRY", category: "SYSTEM", title: `${target.name} is out of naval range`, countryIso: p.iso3, severity: 1 } });
+    return getWorldSnapshot(gameId);
+  }
+  const dmg = forceStrength(fleet.units) * STRIKE.moraleFactor;
+  await prisma.territory.update({ where: { id: target.id }, data: { morale: Math.max(0, target.morale - dmg) } });
+  await prisma.fleet.update({ where: { id: fleet.id }, data: { strikeReadyAt: new Date(Date.now() + STRIKE.cooldownMs) } });
+  await prisma.gameEvent.create({ data: { gameId, scope: "REGIONAL", category: "BATTLE", title: `Naval bombardment on ${target.name}`, body: `Morale −${dmg.toFixed(0)}.`, countryIso: p.iso3, severity: 2 } });
   revalidatePath("/");
   return getWorldSnapshot(gameId);
 }

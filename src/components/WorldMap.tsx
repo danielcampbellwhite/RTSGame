@@ -80,6 +80,17 @@ function enemyUnitPoints(s: WorldSnapshot): GeoJSON.FeatureCollection {
   };
 }
 
+function fleetPoints(s: WorldSnapshot): GeoJSON.FeatureCollection {
+  return {
+    type: "FeatureCollection",
+    features: s.fleets.map((f) => ({
+      type: "Feature",
+      properties: {},
+      geometry: { type: "Point", coordinates: [f.lng, f.lat] },
+    })),
+  };
+}
+
 function combatantPoints(s: WorldSnapshot): GeoJSON.FeatureCollection {
   return {
     type: "FeatureCollection",
@@ -145,6 +156,30 @@ function warIcon() {
   ctx.lineTo(11, 21);
   ctx.strokeStyle = "#fff";
   ctx.lineWidth = 3;
+  ctx.stroke();
+  return { width: s, height: s, data: new Uint8Array(ctx.getImageData(0, 0, s, s).data.buffer) };
+}
+
+function shipIcon() {
+  const s = 36;
+  const cv = document.createElement("canvas");
+  cv.width = s;
+  cv.height = s;
+  const ctx = cv.getContext("2d")!;
+  // simple ship hull
+  ctx.fillStyle = "#38bdf8";
+  ctx.strokeStyle = "#04060a";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(7, 16);
+  ctx.lineTo(29, 16);
+  ctx.lineTo(24, 25);
+  ctx.lineTo(12, 25);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+  ctx.fillRect(16, 9, 4, 7); // mast
+  ctx.fill();
   ctx.stroke();
   return { width: s, height: s, data: new Uint8Array(ctx.getImageData(0, 0, s, s).data.buffer) };
 }
@@ -477,6 +512,7 @@ export default function WorldMap() {
         if (!map.hasImage("UNIT")) map.addImage("UNIT", unitChip("•", "#34d399"), { pixelRatio: 2 });
         if (!map.hasImage("enemy-UNIT")) map.addImage("enemy-UNIT", unitChip("•", "#ef4444"), { pixelRatio: 2 });
         if (!map.hasImage("war")) map.addImage("war", warIcon(), { pixelRatio: 2 });
+        if (!map.hasImage("ship")) map.addImage("ship", shipIcon(), { pixelRatio: 2 });
         for (const k of ZONE_KINDS) if (!map.hasImage(`zone-${k}`)) map.addImage(`zone-${k}`, zoneIcon(k), { pixelRatio: 2 });
 
         const empty: GeoJSON.FeatureCollection = { type: "FeatureCollection", features: [] };
@@ -527,6 +563,10 @@ export default function WorldMap() {
           source: "armies",
           layout: { "icon-image": ["coalesce", ["get", "icon"], "UNIT"], "icon-size": 0.55, "icon-allow-overlap": true, "icon-ignore-placement": true },
         });
+
+        // Player fleets.
+        map.addSource("fleets", { type: "geojson", data: empty });
+        map.addLayer({ id: "fleets", type: "symbol", source: "fleets", layout: { "icon-image": "ship", "icon-size": 0.55, "icon-allow-overlap": true, "icon-ignore-placement": true } });
 
         // Spotted enemy units (red) — only those within your vision.
         map.addSource("enemyunits", { type: "geojson", data: empty });
@@ -594,6 +634,7 @@ export default function WorldMap() {
       (map.getSource("zones") as GeoJSONSource | undefined)?.setData(zonePoints(snapshot));
       (map.getSource("trade") as GeoJSONSource | undefined)?.setData(tradeLines(snapshot));
       (map.getSource("armies") as GeoJSONSource | undefined)?.setData(armyPoints(snapshot));
+      (map.getSource("fleets") as GeoJSONSource | undefined)?.setData(fleetPoints(snapshot));
       (map.getSource("enemyunits") as GeoJSONSource | undefined)?.setData(enemyUnitPoints(snapshot));
       (map.getSource("warmarkers") as GeoJSONSource | undefined)?.setData(combatantPoints(snapshot));
 

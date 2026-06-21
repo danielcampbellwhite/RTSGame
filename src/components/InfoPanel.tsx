@@ -15,6 +15,9 @@ import {
   cancelTradeRoute,
   startResearch,
   strikeZone,
+  recruitNavalAtZone,
+  sailFleetToZone,
+  fleetStrike,
 } from "@/app/actions";
 import type { WorldSnapshot } from "@/lib/snapshot";
 import { buildingCost } from "@/lib/buildings";
@@ -194,6 +197,22 @@ function MilitaryTab({ snapshot }: { snapshot: WorldSnapshot }) {
         ))}
       </Section>
       <p className="text-[10px] text-cyan-200/60">Recruit from a zone with a Barracks (tap a zone → Build → Barracks).</p>
+
+      {snapshot.fleets.length > 0 && (
+        <Section label="Navy">
+          {snapshot.fleets.map((f) => (
+            <div key={f.id} className="rounded border border-[var(--wd-border)] p-1 text-[11px]">
+              <div className="flex justify-between">
+                <span className="text-[var(--wd-cyan)]">⚓ {f.name}</span>
+                <span className="text-cyan-200/75">{f.state}</span>
+              </div>
+              <div className="text-cyan-200/85">
+                Str {f.strength.toFixed(0)} · {f.units.map((u) => `${u.count} ${u.type.toLowerCase()}`).join(", ") || "empty"}
+              </div>
+            </div>
+          ))}
+        </Section>
+      )}
 
       {snapshot.warTargets.length > 0 && (
         <Section label="Offensives">
@@ -388,6 +407,15 @@ const BUILD_OPTIONS: { type: BuildingType; label: string }[] = [
   { type: "POWER_PLANT", label: "Power" },
   { type: "BARRACKS", label: "Barracks" },
   { type: "AIR_BASE", label: "Air Base" },
+  { type: "NAVAL_BASE", label: "Naval Base" },
+  { type: "RADAR", label: "Radar" },
+];
+
+const NAVAL_UNITS: { type: UnitType; label: string }[] = [
+  { type: "FRIGATE", label: "Frigate" },
+  { type: "DESTROYER", label: "Destroyer" },
+  { type: "SUBMARINE", label: "Submarine" },
+  { type: "CARRIER", label: "Carrier" },
 ];
 
 function TerritoryPanel({ snapshot, territory }: { snapshot: WorldSnapshot; territory: WorldSnapshot["territories"][number] }) {
@@ -478,6 +506,23 @@ function TerritoryPanel({ snapshot, territory }: { snapshot: WorldSnapshot; terr
         <div className="text-[10px] text-cyan-200/60">Build a Barracks here to recruit a garrison.</div>
       )}
 
+      {(byType.has("NAVAL_BASE") || byType.has("PORT")) && (
+        <Section label="Build Ships">
+          <div className="grid grid-cols-2 gap-1">
+            {NAVAL_UNITS.map((u) => {
+              const stat = UNIT_STATS[u.type];
+              const afford = money >= stat.moneyCost && snapshot.player.resources.manpower >= stat.manpowerCost;
+              return (
+                <Btn key={u.type} small disabled={isPending || !afford} onClick={() => run(() => recruitNavalAtZone(snapshot.gameId, territory.id, u.type, 1))}>
+                  ⚓ {u.label}
+                  <span className="ml-1 text-[9px] text-cyan-200/70">{stat.moneyCost}₵</span>
+                </Btn>
+              );
+            })}
+          </div>
+        </Section>
+      )}
+
       {(() => {
         const garrison = snapshot.armies.filter((a) => a.locationTerritoryId === territory.id);
         if (!garrison.length) return null;
@@ -555,6 +600,27 @@ function ForeignZonePanel({ snapshot, zone }: { snapshot: WorldSnapshot; zone: W
               {isEnemy ? "March" : "Move"} {a.name} → {zone.name}
             </Btn>
           ))}
+        </Section>
+      )}
+
+      {snapshot.fleets.length > 0 && (
+        <Section label="Navy">
+          {snapshot.fleets.map((f) => {
+            const inRange = Math.hypot(zone.lng - f.lng, zone.lat - f.lat) <= maxRange(f.units);
+            const ready = !f.strikeReadyAt || new Date(f.strikeReadyAt).getTime() <= Date.now();
+            return (
+              <div key={f.id} className="flex gap-1">
+                <Btn small disabled={isPending} onClick={() => run(() => sailFleetToZone(snapshot.gameId, f.id, zone.id))}>
+                  ⛵ Sail here
+                </Btn>
+                {inRange && (
+                  <Btn small danger disabled={isPending || !ready} onClick={() => run(() => fleetStrike(snapshot.gameId, f.id, zone.id))}>
+                    🌊 Bombard{ready ? "" : " (cd)"}
+                  </Btn>
+                )}
+              </div>
+            );
+          })}
         </Section>
       )}
 
