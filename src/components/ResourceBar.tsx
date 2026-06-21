@@ -31,7 +31,7 @@ export default function ResourceBar() {
       {/* Country identity */}
       <div className="flex shrink-0 flex-col justify-center leading-tight">
         <span className="neon-text text-base font-bold text-[var(--wd-magenta)]">{player.name}</span>
-        <span className="text-[9px] uppercase tracking-[0.2em] text-cyan-300/50">{player.iso3} · World Dominion</span>
+        <span className="text-[9px] uppercase tracking-[0.2em] text-cyan-300/75">{player.iso3} · World Dominion</span>
       </div>
 
       <Divider />
@@ -66,7 +66,7 @@ function Divider() {
 function Chip({ label, value, color, bar }: { label: string; value: string; color: string; bar?: number }) {
   return (
     <div className="flex min-w-[58px] shrink-0 flex-col justify-center">
-      <span className="text-[9px] uppercase tracking-wide text-cyan-200/45">{label}</span>
+      <span className="text-[9px] uppercase tracking-wide text-cyan-200/70">{label}</span>
       <span className="neon-text text-sm font-bold" style={{ color }}>
         {value}
       </span>

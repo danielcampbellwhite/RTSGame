@@ -13,7 +13,7 @@ export default function Onboarding({ onClose }: { onClose: () => void }) {
         <h2 className="neon-text mb-1 text-lg font-bold text-[var(--wd-magenta)]">
           You command {snapshot.player.name}
         </h2>
-        <p className="mb-3 text-xs text-cyan-200/60">
+        <p className="mb-3 text-xs text-cyan-200/80">
           A persistent real-time world. It keeps running even when you log off — log back in and time has passed.
         </p>
 
@@ -23,7 +23,7 @@ export default function Onboarding({ onClose }: { onClose: () => void }) {
           <Standing label="Territory" rank={r.territory} total={r.total} />
         </div>
 
-        <ul className="mb-4 space-y-1.5 text-xs text-cyan-200/80">
+        <ul className="mb-4 space-y-1.5 text-xs text-cyan-200/90">
           <li>💰 <b>Economy is power.</b> Use <b>Command → Policy</b> to balance tax and spending. Don't run a deficit.</li>
           <li>🏗️ <b>Build.</b> Tap one of your territory rings on the map to construct factories, farms and bases.</li>
           <li>⚔️ <b>Military.</b> Recruit units and march on rivals from the <b>Military</b> tab.</li>
@@ -31,7 +31,7 @@ export default function Onboarding({ onClose }: { onClose: () => void }) {
           <li>🔬 <b>Research.</b> Spend your research budget on the tech tree.</li>
           <li>⏱️ <b>Time.</b> Pause or speed up with the controls top-left.</li>
         </ul>
-        <p className="mb-3 text-[11px] text-cyan-200/40">
+        <p className="mb-3 text-[11px] text-cyan-200/70">
           There's no single win condition — climb the rankings, dominate a region, or just survive.
         </p>
 
@@ -54,11 +54,11 @@ function SaveCode({ code }: { code: string }) {
   };
   return (
     <div className="rounded border border-[var(--wd-border)] p-2">
-      <div className="text-[9px] uppercase tracking-widest text-cyan-200/40">
+      <div className="text-[9px] uppercase tracking-widest text-cyan-200/70">
         Save code — copy this to resume on another device
       </div>
       <div className="flex items-center gap-2">
-        <code className="flex-1 truncate text-[11px] text-cyan-200/80">{code}</code>
+        <code className="flex-1 truncate text-[11px] text-cyan-200/90">{code}</code>
         <button onClick={copy} className="rounded border border-[var(--wd-border)] px-2 py-0.5 text-[10px] hover:border-[var(--wd-cyan)] hover:text-[var(--wd-cyan)]">
           Copy
         </button>
@@ -70,10 +70,10 @@ function SaveCode({ code }: { code: string }) {
 function Standing({ label, rank, total }: { label: string; rank: number; total: number }) {
   return (
     <div className="rounded border border-[var(--wd-border)] py-1">
-      <div className="text-[9px] uppercase tracking-widest text-cyan-200/40">{label}</div>
+      <div className="text-[9px] uppercase tracking-widest text-cyan-200/70">{label}</div>
       <div className="neon-text text-[var(--wd-cyan)]">
         #{rank}
-        <span className="text-[9px] text-cyan-200/40">/{total}</span>
+        <span className="text-[9px] text-cyan-200/70">/{total}</span>
       </div>
     </div>
   );

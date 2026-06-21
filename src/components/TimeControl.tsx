@@ -23,7 +23,7 @@ export default function TimeControl() {
     <div className="panel glow-border flex items-center justify-center gap-3 px-3 py-2">
       {/* Day counter */}
       <div className="flex flex-col items-center leading-none">
-        <span className="text-[9px] uppercase tracking-widest text-cyan-200/40">Day</span>
+        <span className="text-[9px] uppercase tracking-widest text-cyan-200/70">Day</span>
         <span className="neon-text text-xl font-bold text-[var(--wd-cyan)]">{Math.floor(ageDays)}</span>
       </div>
 
@@ -53,7 +53,7 @@ export default function TimeControl() {
               className={`h-10 w-10 rounded text-sm font-bold disabled:opacity-40 ${
                 active
                   ? "bg-[var(--wd-cyan)]/20 text-[var(--wd-cyan)] glow-border"
-                  : "border border-[var(--wd-border)] text-cyan-200/50"
+                  : "border border-[var(--wd-border)] text-cyan-200/75"
               }`}
             >
               {s}×

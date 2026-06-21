@@ -78,7 +78,7 @@ export default function InfoPanel() {
             key={t}
             onClick={() => setTab(t)}
             className={`rounded px-2 py-0.5 text-[10px] uppercase ${
-              tab === t ? "bg-[var(--wd-cyan)]/20 text-[var(--wd-cyan)]" : "text-cyan-200/50"
+              tab === t ? "bg-[var(--wd-cyan)]/20 text-[var(--wd-cyan)]" : "text-cyan-200/75"
             }`}
           >
             {t}
@@ -119,7 +119,7 @@ function PolicyTab({ snapshot }: { snapshot: WorldSnapshot }) {
 
   const slider = (key: keyof typeof levers, label: string) => (
     <label className="block text-xs">
-      <div className="flex justify-between text-cyan-200/70">
+      <div className="flex justify-between text-cyan-200/85">
         <span>{label}</span>
         <span className="neon-text text-[var(--wd-cyan)]">{levers[key].toFixed(0)}%</span>
       </div>
@@ -150,7 +150,7 @@ function PolicyTab({ snapshot }: { snapshot: WorldSnapshot }) {
       <Btn disabled={isPending} onClick={() => run(() => setBudget(snapshot.gameId, levers))}>
         {isPending ? "Applying…" : "Apply Policy"}
       </Btn>
-      <p className="text-[10px] text-cyan-200/40">High tax erodes morale; military upkeep grows super-linearly.</p>
+      <p className="text-[10px] text-cyan-200/70">High tax erodes morale; military upkeep grows super-linearly.</p>
     </div>
   );
 }
@@ -185,9 +185,9 @@ function MilitaryTab({ snapshot }: { snapshot: WorldSnapshot }) {
           <div key={a.id} className="rounded border border-[var(--wd-border)] p-1 text-[11px]">
             <div className="flex justify-between">
               <span className="text-[var(--wd-cyan)]">{a.name}</span>
-              <span className="text-cyan-200/50">{a.state}</span>
+              <span className="text-cyan-200/75">{a.state}</span>
             </div>
-            <div className="text-cyan-200/70">
+            <div className="text-cyan-200/85">
               Strength {a.strength.toFixed(0)} · {a.units.map((u) => `${u.count} ${u.type.toLowerCase()}`).join(", ") || "empty"}
             </div>
           </div>
@@ -352,7 +352,7 @@ function ResearchTab({ snapshot }: { snapshot: WorldSnapshot }) {
             <div key={r.techKey} className="text-[11px]">
               <div className="flex justify-between">
                 <span>{r.name}</span>
-                <span className="text-cyan-200/50">{r.progress.toFixed(0)}%</span>
+                <span className="text-cyan-200/75">{r.progress.toFixed(0)}%</span>
               </div>
               <div className="h-1 w-full rounded bg-[var(--wd-border)]">
                 <div className="h-full rounded bg-[var(--wd-cyan)]" style={{ width: `${r.progress}%` }} />
@@ -365,8 +365,8 @@ function ResearchTab({ snapshot }: { snapshot: WorldSnapshot }) {
           const locked = t.requires.some((req) => !completedKeys.has(req));
           return (
             <div key={t.key} className="flex items-center justify-between text-[11px]">
-              <span className={locked ? "text-cyan-200/30" : ""}>
-                {t.name} <span className="text-cyan-200/40">({t.category.toLowerCase()}, {t.days}d)</span>
+              <span className={locked ? "text-cyan-200/60" : ""}>
+                {t.name} <span className="text-cyan-200/70">({t.category.toLowerCase()}, {t.days}d)</span>
               </span>
               <Btn small disabled={isPending || locked} onClick={() => run(() => startResearch(snapshot.gameId, t.key))}>
                 {locked ? "Locked" : "Research"}
@@ -408,11 +408,11 @@ function TerritoryPanel({ snapshot, territory }: { snapshot: WorldSnapshot; terr
         return (
           <div className="grid grid-cols-2 gap-1 text-center text-[10px]">
             <div className="rounded border border-[var(--wd-border)] py-1">
-              <div className="uppercase tracking-widest text-cyan-200/40">Economy</div>
+              <div className="uppercase tracking-widest text-cyan-200/70">Economy</div>
               <div className="neon-text text-[var(--wd-green)]">+{o.econ}</div>
             </div>
             <div className="rounded border border-[var(--wd-border)] py-1">
-              <div className="uppercase tracking-widest text-cyan-200/40">Military</div>
+              <div className="uppercase tracking-widest text-cyan-200/70">Military</div>
               <div className="neon-text text-[var(--wd-red)]">+{o.mil}</div>
             </div>
           </div>
@@ -423,7 +423,7 @@ function TerritoryPanel({ snapshot, territory }: { snapshot: WorldSnapshot; terr
         <Section label="Buildings">
           {territory.buildings.map((b) => (
             <div key={b.type} className="flex items-center justify-between text-[11px]">
-              <span className="text-cyan-200/80">
+              <span className="text-cyan-200/90">
                 {b.type.replace(/_/g, " ").toLowerCase()} <span className="text-[var(--wd-cyan)]">Lv{b.level}</span>
               </span>
               {b.completesAt ? (
@@ -450,12 +450,12 @@ function TerritoryPanel({ snapshot, territory }: { snapshot: WorldSnapshot; terr
                 onClick={() => run(() => queueBuilding(snapshot.gameId, territory.id, b.type))}
               >
                 {existing ? `▲ ${b.label} Lv${target}` : `+ ${b.label}`}
-                <span className="ml-1 text-[9px] text-cyan-200/40">{cost.money}₵ {cost.steel}▮</span>
+                <span className="ml-1 text-[9px] text-cyan-200/70">{cost.money}₵ {cost.steel}▮</span>
               </Btn>
             );
           })}
         </div>
-        <div className="text-[10px] text-cyan-200/40">Cost: ₵ treasury + ▮ steel. Higher levels cost more.</div>
+        <div className="text-[10px] text-cyan-200/70">Cost: ₵ treasury + ▮ steel. Higher levels cost more.</div>
       </Section>
 
       {snapshot.armies.length > 0 && (
@@ -509,7 +509,7 @@ function Shell({ title, subtitle, children }: { title?: string; subtitle?: strin
         <div className="flex items-start justify-between border-b border-[var(--wd-border)] pb-1">
           <div>
             <div className="neon-text text-sm font-bold text-[var(--wd-cyan)]">{title}</div>
-            {subtitle && <div className="text-[10px] uppercase tracking-widest text-cyan-200/40">{subtitle}</div>}
+            {subtitle && <div className="text-[10px] uppercase tracking-widest text-cyan-200/70">{subtitle}</div>}
           </div>
           {hasSelection && (
             <button
@@ -517,7 +517,7 @@ function Shell({ title, subtitle, children }: { title?: string; subtitle?: strin
                 select(null);
                 selectC(null);
               }}
-              className="text-[10px] text-cyan-200/50 hover:text-[var(--wd-cyan)]"
+              className="text-[10px] text-cyan-200/75 hover:text-[var(--wd-cyan)]"
             >
               ✕ close
             </button>
@@ -532,7 +532,7 @@ function Shell({ title, subtitle, children }: { title?: string; subtitle?: strin
 function Section({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="space-y-1">
-      <div className="text-[10px] uppercase tracking-widest text-cyan-200/50">{label}</div>
+      <div className="text-[10px] uppercase tracking-widest text-cyan-200/75">{label}</div>
       {children}
     </div>
   );
@@ -567,7 +567,7 @@ function Btn({
 function Bar({ label, value, pct, danger }: { label: string; value: string; pct?: number; danger?: boolean }) {
   return (
     <div className="text-xs">
-      <div className="flex justify-between text-cyan-200/70">
+      <div className="flex justify-between text-cyan-200/85">
         <span>{label}</span>
         <span className="neon-text text-cyan-200">{value}</span>
       </div>
@@ -581,16 +581,16 @@ function Bar({ label, value, pct, danger }: { label: string; value: string; pct?
 }
 
 function Empty({ children }: { children: React.ReactNode }) {
-  return <div className="text-[11px] text-cyan-200/30">{children}</div>;
+  return <div className="text-[11px] text-cyan-200/60">{children}</div>;
 }
 
 function Rank({ label, rank, total }: { label: string; rank: number; total: number }) {
   return (
     <div className="rounded border border-[var(--wd-border)] py-1">
-      <div className="uppercase tracking-widest text-cyan-200/40">{label}</div>
+      <div className="uppercase tracking-widest text-cyan-200/70">{label}</div>
       <div className="neon-text text-[var(--wd-cyan)]">
         #{rank}
-        <span className="text-cyan-200/40">/{total}</span>
+        <span className="text-cyan-200/70">/{total}</span>
       </div>
     </div>
   );

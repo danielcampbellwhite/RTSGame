@@ -182,7 +182,7 @@ export default function Page() {
           <WorldMap />
           <button
             onClick={() => setShowOnboarding(true)}
-            className="panel absolute bottom-2 right-2 z-10 h-7 w-7 rounded-full text-sm text-cyan-200/70 hover:text-[var(--wd-cyan)]"
+            className="panel absolute bottom-2 right-2 z-10 h-7 w-7 rounded-full text-sm text-cyan-200/85 hover:text-[var(--wd-cyan)]"
             title="Help"
           >
             ?
@@ -209,7 +209,7 @@ export default function Page() {
               key={t}
               onClick={() => setMobileTab(t)}
               className={`panel relative min-w-0 flex-1 truncate rounded py-3 text-xs uppercase tracking-wide ${
-                mobileTab === t ? "text-[var(--wd-cyan)] glow-border" : "text-cyan-200/50"
+                mobileTab === t ? "text-[var(--wd-cyan)] glow-border" : "text-cyan-200/75"
               }`}
             >
               {t === "map" ? "Map" : t === "info" ? "Command" : "Feed"}
@@ -244,7 +244,7 @@ function StartScreen({ onStart, onResume }: { onStart: (iso: string) => void; on
       <h1 className="neon-text text-center text-2xl font-bold tracking-widest text-[var(--wd-magenta)] sm:text-3xl">
         WORLD DOMINION
       </h1>
-      <p className="text-center text-xs text-cyan-200/60 sm:text-sm">
+      <p className="text-center text-xs text-cyan-200/80 sm:text-sm">
         Choose the nation you will command. Every other country is AI.
       </p>
       <input
@@ -268,7 +268,7 @@ function StartScreen({ onStart, onResume }: { onStart: (iso: string) => void; on
       </div>
 
       <div className="mt-2 flex w-full max-w-xs flex-col items-center gap-1">
-        <div className="text-[10px] uppercase tracking-widest text-cyan-200/40">Resume a save</div>
+        <div className="text-[10px] uppercase tracking-widest text-cyan-200/70">Resume a save</div>
         <div className="flex w-full gap-1">
           <input
             placeholder="Paste save code…"
@@ -291,7 +291,7 @@ function StartScreen({ onStart, onResume }: { onStart: (iso: string) => void; on
 
 function Center({ children }: { children: React.ReactNode }) {
   return (
-    <div className="fixed left-0 top-0 flex h-full w-full items-center justify-center px-4 text-center text-sm text-cyan-200/60">
+    <div className="fixed left-0 top-0 flex h-full w-full items-center justify-center px-4 text-center text-sm text-cyan-200/80">
       <span className="pulse">{children}</span>
     </div>
   );

@@ -11,22 +11,22 @@ export default function EventFeed({ muted, onToggleMute }: { muted?: boolean; on
   return (
     <div className="panel glow-border h-full overflow-y-auto scroll-thin px-3 py-2">
       <div className="mb-1 flex items-center justify-between">
-        <span className="text-[10px] uppercase tracking-widest text-cyan-200/50">Global Intelligence Feed</span>
+        <span className="text-[10px] uppercase tracking-widest text-cyan-200/75">Global Intelligence Feed</span>
         {onToggleMute && (
           <button
             onClick={onToggleMute}
-            className="text-sm text-cyan-200/60 hover:text-[var(--wd-cyan)]"
+            className="text-sm text-cyan-200/80 hover:text-[var(--wd-cyan)]"
             title={muted ? "Unmute alerts" : "Mute alerts"}
           >
             {muted ? "🔕" : "🔔"}
           </button>
         )}
       </div>
-      {events.length === 0 && <div className="text-xs text-cyan-200/30">No reports yet. The world is quiet… for now.</div>}
+      {events.length === 0 && <div className="text-xs text-cyan-200/60">No reports yet. The world is quiet… for now.</div>}
       <ul className="space-y-0.5">
         {events.map((e) => (
           <li key={e.id} className="flex items-baseline gap-2 text-xs">
-            <span className="text-cyan-200/30">{new Date(e.createdAt).toLocaleTimeString()}</span>
+            <span className="text-cyan-200/60">{new Date(e.createdAt).toLocaleTimeString()}</span>
             <span
               className="rounded px-1 text-[9px] uppercase"
               style={{ color: SEVERITY_COLOR[e.severity] ?? "#7fe9f7", border: `1px solid ${SEVERITY_COLOR[e.severity] ?? "#7fe9f7"}33` }}
