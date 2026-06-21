@@ -95,6 +95,61 @@ html {
   display: none;
 }
 
+/* Zone overview card (popup over the map). */
+.wd-overview .maplibregl-popup-content {
+  background: rgba(6, 12, 20, 0.95);
+  border: 1px solid var(--wd-cyan);
+  border-radius: 6px;
+  padding: 8px 10px;
+  color: #cbe7f5;
+  box-shadow: 0 0 14px rgba(34, 211, 238, 0.35);
+  font-size: 11px;
+  min-width: 170px;
+}
+.wd-overview .maplibregl-popup-tip {
+  border-top-color: var(--wd-cyan);
+  border-bottom-color: var(--wd-cyan);
+}
+.wd-overview .maplibregl-popup-close-button {
+  color: var(--wd-cyan);
+  font-size: 16px;
+  padding: 0 5px;
+}
+.wd-ov-title {
+  font-weight: 700;
+  color: var(--wd-cyan);
+  text-shadow: 0 0 6px currentColor;
+}
+.wd-ov-sub {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: rgb(165 243 252 / 0.6);
+  margin-bottom: 5px;
+}
+.wd-ov-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 3px;
+}
+.wd-ov-bar {
+  height: 3px;
+  background: var(--wd-border);
+  border-radius: 2px;
+  margin-top: 2px;
+}
+.wd-ov-bar i {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+}
+.wd-ov-hint {
+  margin-top: 6px;
+  font-size: 9px;
+  color: rgb(165 243 252 / 0.5);
+}
+
 /* Zoom-in country name labels (DOM markers). */
 .wd-country-label {
   font-size: 10px;

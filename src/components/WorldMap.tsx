@@ -201,6 +201,42 @@ function zoneIcon(kind: string) {
   return { width: s, height: s, data: new Uint8Array(ctx.getImageData(0, 0, s, s).data.buffer) };
 }
 
+const ECON_B = new Set(["FACTORY", "POWER_PLANT", "FARM", "PORT", "RAILWAY", "ROAD", "AIRPORT", "HOSPITAL", "HOUSING"]);
+const MIL_B = new Set(["BARRACKS", "AIR_BASE", "NAVAL_BASE", "MISSILE_SILO", "RADAR"]);
+
+// High-level overview card shown over a zone on first tap.
+function overviewHTML(
+  zone: WorldSnapshot["allZones"][number],
+  terr: WorldSnapshot["territories"][number] | undefined,
+  ownerName: string
+): string {
+  const bar = (label: string, v: number, color: string) =>
+    `<div class="wd-ov-row"><span>${label}</span><span style="color:${color}">${v.toFixed(0)}</span></div>
+     <div class="wd-ov-bar"><i style="width:${Math.max(0, Math.min(100, v))}%;background:${color}"></i></div>`;
+  let body = "";
+  if (terr) {
+    let econ = 0;
+    let mil = 0;
+    for (const b of terr.buildings) {
+      if (ECON_B.has(b.type)) econ += b.level * 2;
+      if (MIL_B.has(b.type)) mil += b.level * 3;
+    }
+    body =
+      bar("Morale", terr.morale, "#34d399") +
+      bar("Unrest", terr.unrest, "#ef4444") +
+      `<div class="wd-ov-row"><span>Population</span><span>${terr.population.toFixed(1)}M</span></div>` +
+      `<div class="wd-ov-row"><span>Contributes</span><span><b style="color:#34d399">+${econ}</b> econ · <b style="color:#fb7185">+${mil}</b> mil</span></div>`;
+  } else {
+    body =
+      `<div class="wd-ov-row"><span>Control</span><span>${zone.controlPct.toFixed(0)}%</span></div>` +
+      (zone.visible ? "" : `<div class="wd-ov-hint">🌫 Out of vision</div>`);
+  }
+  return `<div class="wd-ov-title">${zone.name}</div>
+    <div class="wd-ov-sub">${zone.kind.replace(/_/g, " ").toLowerCase()} · ${ownerName}</div>
+    ${body}
+    <div class="wd-ov-hint">tap again to manage →</div>`;
+}
+
 function webglAvailable(): boolean {
   try {
     const c = document.createElement("canvas");
@@ -288,6 +324,7 @@ export default function WorldMap() {
   const ref = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MlMap | null>(null);
   const popupRef = useRef<Popup | null>(null);
+  const overviewRef = useRef<Popup | null>(null);
   const roRef = useRef<ResizeObserver | null>(null);
   const nameToIso = useRef<Map<string, string>>(new Map());
   const toRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -401,15 +438,30 @@ export default function WorldMap() {
         for (const mk of labelsRef.current) mk.getElement().style.display = show ? "" : "none";
       });
 
-      // Two-stage tap: first tap just highlights a zone, second opens management.
+      const overview = new maplibregl.Popup({ closeButton: true, closeOnClick: false, className: "wd-overview", maxWidth: "240px", offset: 12 });
+      overviewRef.current = overview;
+      const showOverview = (zoneId: string) => {
+        const snap = snapshotRef.current;
+        if (!snap) return;
+        const zone = snap.allZones.find((z) => z.id === zoneId);
+        if (!zone) return;
+        const terr = snap.territories.find((t) => t.id === zoneId);
+        const ownerC = snap.countries.find((c) => c.iso3 === zone.ownerIso);
+        const ownerName = zone.visible ? ownerC?.name ?? zone.ownerIso ?? "—" : "Unknown";
+        overview.setLngLat([zone.lng, zone.lat]).setHTML(overviewHTML(zone, terr, ownerName)).addTo(map);
+      };
+
+      // Two-stage tap: first tap highlights + overview card, second opens management.
       const onZone = (zoneId?: string) => {
         if (!zoneId) return;
         const st = useGameStore.getState();
         if (st.highlightedZoneId === zoneId) {
+          overview.remove();
           st.selectTerritory(zoneId);
         } else {
           st.highlightZone(zoneId);
           st.selectTerritory(null);
+          showOverview(zoneId);
         }
       };
 
@@ -517,6 +569,8 @@ export default function WorldMap() {
       roRef.current = null;
       for (const mk of labelsRef.current) mk.remove();
       labelsRef.current = [];
+      overviewRef.current?.remove();
+      overviewRef.current = null;
       mapRef.current?.remove();
       mapRef.current = null;
     };

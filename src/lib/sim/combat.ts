@@ -32,24 +32,30 @@ export function stepCombat(armies: SimArmy[], dtMs: number, ctx: CombatContext):
     }
 
     const terrainMult = COMBAT.terrain[terr.terr] ?? 1;
+    // Defenders: the zone's fortifications + any friendly garrison stationed here.
     const garrison = (ctx.armiesByTerritory.get(terr.id) ?? [])
       .filter((a) => a.countryId === terr.countryId)
       .reduce((s, a) => s + a.strength * (a.morale / 100), 0);
     const defense = (terr.defenses + garrison) * terrainMult;
     const attack = army.strength * (army.morale / 100) * (army.supply / 100);
-
     const net = attack - defense;
-    terr.controlPct = clamp(terr.controlPct - net * COMBAT.controlRate * dt * 100);
 
-    // Attrition on the attacker either way; harder when losing.
+    // The zone's morale is the capture meter: assault drains it, a holding
+    // garrison slowly restores it. Stronger advantage -> faster fall (hours);
+    // an even matchup grinds for days. Multiple/allied attackers stack here.
+    if (net > 0) terr.morale = clamp(terr.morale - net * COMBAT.moraleRate * dt);
+    else terr.morale = clamp(terr.morale + -net * COMBAT.moraleRecover * dt);
+
+    // Attrition on the attacker either way; worse when losing.
     const attrition = COMBAT.attritionRate * dt * (net > 0 ? 0.6 : 1.4);
     for (const u of army.units) u.health = clamp(u.health - attrition * 100);
     army.morale = clamp(army.morale - (net > 0 ? 0 : attrition * 50), 0, 100);
 
-    if (terr.controlPct <= 0) {
+    if (terr.morale <= 0) {
       // Capture: ownership transfers to the attacker; the sector is occupied.
       ctx.captures.set(terr.id, army.countryId);
       terr.countryId = army.countryId;
+      terr.morale = COMBAT.capturedMorale;
       terr.controlPct = 100;
       terr.occupied = true;
       terr.defenses = Math.max(5, terr.defenses * 0.5);

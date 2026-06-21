@@ -56,10 +56,14 @@ export const WORLD_EVENTS = {
 } as const;
 
 export const COMBAT = {
-  /** How fast control flips per minute per net-strength point. */
-  controlRate: 0.0008,
+  /** Zone morale lost per minute per net attacker-strength point (capture meter). */
+  moraleRate: 0.01,
+  /** Zone morale recovered per minute per net defender-strength point when holding. */
+  moraleRecover: 0.004,
   /** Attrition to attacker health per minute while engaged. */
   attritionRate: 0.02,
+  /** Morale a freshly captured (occupied) zone starts at. */
+  capturedMorale: 35,
   /** Terrain defensive multipliers. */
   terrain: { PLAINS: 1, FOREST: 1.2, MOUNTAIN: 1.5, DESERT: 0.9, URBAN: 1.4, COASTAL: 1.1 } as Record<string, number>,
 } as const;
