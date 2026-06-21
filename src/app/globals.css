@@ -89,3 +89,15 @@ body {
 .wd-popup .maplibregl-popup-tip {
   display: none;
 }
+
+/* Zoom-in country name labels (DOM markers). */
+.wd-country-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: #e7fbff;
+  text-shadow: 0 0 4px #000, 0 0 6px #000;
+  white-space: nowrap;
+  pointer-events: none;
+  text-transform: uppercase;
+}

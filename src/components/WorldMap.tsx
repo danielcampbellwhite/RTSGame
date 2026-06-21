@@ -2,7 +2,7 @@
 
 import "maplibre-gl/dist/maplibre-gl.css";
 import { useEffect, useRef, useState } from "react";
-import type { Map as MlMap, GeoJSONSource, Popup } from "maplibre-gl";
+import type { Map as MlMap, GeoJSONSource, Popup, Marker, MarkerOptions } from "maplibre-gl";
 import { useGameStore } from "@/store/game";
 import type { WorldSnapshot } from "@/lib/snapshot";
 
@@ -191,6 +191,8 @@ export default function WorldMap() {
   const roRef = useRef<ResizeObserver | null>(null);
   const nameToIso = useRef<Map<string, string>>(new Map());
   const toRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const glRef = useRef<{ Marker: new (opts?: MarkerOptions) => Marker } | null>(null);
+  const labelsRef = useRef<Marker[]>([]);
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [msg, setMsg] = useState("");
   const snapshot = useGameStore((s) => s.snapshot);
@@ -203,6 +205,7 @@ export default function WorldMap() {
     (async () => {
       const maplibregl = (await import("maplibre-gl")).default;
       if (cancelled || !ref.current || mapRef.current) return;
+      glRef.current = maplibregl;
 
       if (!webglAvailable()) {
         setMsg("WebGL is not available in this browser/device.");
@@ -270,6 +273,14 @@ export default function WorldMap() {
           return s;
         });
       }, 8000);
+
+      // Show country labels only once zoomed in past the strategic view.
+      const LABEL_ZOOM = 3;
+      const toggleLabels = () => {
+        const show = map.getZoom() >= LABEL_ZOOM;
+        for (const mk of labelsRef.current) mk.getElement().style.display = show ? "" : "none";
+      };
+      map.on("zoom", toggleLabels);
 
       map.on("load", () => {
         if (toRef.current) clearTimeout(toRef.current);
@@ -418,6 +429,8 @@ export default function WorldMap() {
       if (toRef.current) clearTimeout(toRef.current);
       roRef.current?.disconnect();
       roRef.current = null;
+      for (const mk of labelsRef.current) mk.remove();
+      labelsRef.current = [];
       mapRef.current?.remove();
       mapRef.current = null;
     };
@@ -449,6 +462,22 @@ export default function WorldMap() {
       if (map.getLayer("enemy-fill")) {
         const enemyNames = expandNames(snapshot.countries.filter((c) => c.atWar).map((c) => c.name));
         map.setFilter("enemy-fill", ["in", ["get", "name"], ["literal", enemyNames]]);
+      }
+
+      // Country name labels (DOM markers) — rebuilt to match the world, shown by zoom.
+      const gl = glRef.current;
+      if (gl) {
+        for (const mk of labelsRef.current) mk.remove();
+        const show = map.getZoom() >= 3;
+        labelsRef.current = snapshot.countries
+          .filter((c) => c.isAlive)
+          .map((c) => {
+            const el = document.createElement("div");
+            el.className = "wd-country-label";
+            el.textContent = c.name;
+            el.style.display = show ? "" : "none";
+            return new gl.Marker({ element: el, anchor: "center" }).setLngLat([c.lng, c.lat]).addTo(map);
+          });
       }
     };
     if (map.isStyleLoaded()) apply();
