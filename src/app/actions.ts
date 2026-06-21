@@ -7,7 +7,7 @@ import { getWorldSnapshot, type WorldSnapshot } from "@/lib/snapshot";
 import { DIPLOMACY, STRIKE } from "@/lib/balance";
 import { buildingCost, buildingDurationMs } from "@/lib/buildings";
 import { UNIT_STATS, maxRange, forceStrength } from "@/lib/units";
-import { recruit, orderMove, recruitAt, recruitNaval, sailFleet } from "@/lib/sim/forces";
+import { recruit, orderMove, recruitAt, recruitNaval, sailFleet, amphibiousAssault } from "@/lib/sim/forces";
 import { startResearchProject } from "@/lib/sim/research";
 import { declareWar as declareWarCore, endWar, adjustOpinion, setFlags } from "@/lib/sim/diplomacy";
 import type { BuildingType, UnitType, TradeGood } from "@prisma/client";
@@ -256,7 +256,38 @@ export async function moveArmy(gameId: string, armyId: string, territoryId: stri
   await catchUp(gameId);
   const p = await player(gameId);
   const army = await prisma.army.findUnique({ where: { id: armyId } });
-  if (p && army && army.countryId === p.id) await orderMove(armyId, territoryId);
+  if (p && army && army.countryId === p.id) {
+    const ok = await orderMove(armyId, territoryId);
+    if (!ok) {
+      const t = await prisma.territory.findUnique({ where: { id: territoryId } });
+      await prisma.gameEvent.create({
+        data: { gameId, scope: "COUNTRY", category: "SYSTEM", title: `${t?.name ?? "Target"} can't be reached by land — use an amphibious assault`, countryIso: p.iso3, severity: 2 },
+      });
+    }
+  }
+  revalidatePath("/");
+  return getWorldSnapshot(gameId);
+}
+
+/** Send an army across water to a target zone, escorted by a nearby fleet. */
+export async function amphibiousAssaultAction(gameId: string, armyId: string, territoryId: string) {
+  await catchUp(gameId);
+  const p = await player(gameId);
+  if (!p) return getWorldSnapshot(gameId);
+  const res = await amphibiousAssault(p.id, armyId, territoryId);
+  if (res !== "ok") {
+    const t = await prisma.territory.findUnique({ where: { id: territoryId } });
+    await prisma.gameEvent.create({
+      data: {
+        gameId,
+        scope: "COUNTRY",
+        category: "SYSTEM",
+        title: res === "no-fleet" ? `Bring a fleet near your army to assault ${t?.name ?? "the target"}` : `Amphibious assault failed`,
+        countryIso: p.iso3,
+        severity: 2,
+      },
+    });
+  }
   revalidatePath("/");
   return getWorldSnapshot(gameId);
 }

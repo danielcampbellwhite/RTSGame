@@ -18,6 +18,7 @@ import {
   recruitNavalAtZone,
   sailFleetToZone,
   fleetStrike,
+  amphibiousAssaultAction,
 } from "@/app/actions";
 import type { WorldSnapshot } from "@/lib/snapshot";
 import { buildingCost } from "@/lib/buildings";
@@ -595,11 +596,22 @@ function ForeignZonePanel({ snapshot, zone }: { snapshot: WorldSnapshot; zone: W
 
       {snapshot.armies.length > 0 && (
         <Section label={isEnemy ? "Attack" : "Move Army Here"}>
-          {snapshot.armies.map((a) => (
-            <Btn key={a.id} small danger={isEnemy} disabled={isPending} onClick={() => run(() => moveArmy(snapshot.gameId, a.id, zone.id))}>
-              {isEnemy ? "March" : "Move"} {a.name} → {zone.name}
-            </Btn>
-          ))}
+          {snapshot.armies.map((a) => {
+            const loc = a.locationTerritoryId && snapshot.allZones.find((z) => z.id === a.locationTerritoryId);
+            const fleetNear = !!loc && snapshot.fleets.some((f) => Math.hypot(f.lng - loc.lng, f.lat - loc.lat) <= 3);
+            return (
+              <div key={a.id} className="flex flex-col gap-0.5">
+                <Btn small danger={isEnemy} disabled={isPending} onClick={() => run(() => moveArmy(snapshot.gameId, a.id, zone.id))}>
+                  {isEnemy ? "March" : "Move"} {a.name} → {zone.name}
+                </Btn>
+                {fleetNear && (
+                  <Btn small danger disabled={isPending} onClick={() => run(() => amphibiousAssaultAction(snapshot.gameId, a.id, zone.id))}>
+                    🚢 Amphibious assault — {a.name}
+                  </Btn>
+                )}
+              </div>
+            );
+          })}
         </Section>
       )}
 

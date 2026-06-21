@@ -48,6 +48,36 @@ export async function runAI(gameId: string, rng: Rng): Promise<void> {
     else if (action === "diplomacy") await aiDiplomacy(gameId, c.id, rng);
     else if (action === "war") await aiWar(gameId, c, rng);
   }
+
+  await joinAlliedWars(gameId, rng);
+}
+
+/** AI nations join wars on the side of their allies. */
+async function joinAlliedWars(gameId: string, rng: Rng) {
+  const allied = await prisma.diplomaticRelation.findMany({ where: { allied: true, from: { gameId } }, select: { fromId: true, toId: true } });
+  const atWar = await prisma.diplomaticRelation.findMany({ where: { atWar: true, from: { gameId } }, select: { fromId: true, toId: true } });
+  if (!allied.length || !atWar.length) return;
+
+  const allies = new Map<string, string[]>();
+  for (const r of allied) (allies.get(r.fromId) ?? allies.set(r.fromId, []).get(r.fromId)!).push(r.toId);
+  const enemies = new Map<string, Set<string>>();
+  for (const r of atWar) (enemies.get(r.fromId) ?? enemies.set(r.fromId, new Set()).get(r.fromId)!).add(r.toId);
+
+  const countries = await prisma.country.findMany({ where: { gameId, isPlayer: false, isAlive: true }, select: { id: true } });
+  const alive = new Set(countries.map((c) => c.id));
+  for (const c of countries) {
+    if (rng() > 0.35) continue;
+    const myEnemies = enemies.get(c.id) ?? new Set<string>();
+    for (const ally of allies.get(c.id) ?? []) {
+      const allyEnemies = enemies.get(ally);
+      if (!allyEnemies) continue;
+      const join = [...allyEnemies].find((e) => e !== c.id && alive.has(e) && !myEnemies.has(e));
+      if (join) {
+        await declareWar(gameId, c.id, join); // honour the alliance
+        break;
+      }
+    }
+  }
 }
 
 async function aiEconomy(countryId: string, rng: Rng) {
@@ -85,8 +115,15 @@ async function aiDiplomacy(gameId: string, countryId: string, rng: Rng) {
   });
   if (!others.length) return;
   const target = others[Math.floor(rng() * others.length)];
-  const { adjustOpinion } = await import("@/lib/sim/diplomacy");
+  const { adjustOpinion, setFlags } = await import("@/lib/sim/diplomacy");
   await adjustOpinion(countryId, target.id, 8);
+  // Warm relations can blossom into an alliance.
+  const rel = await prisma.diplomaticRelation.findUnique({
+    where: { fromId_toId: { fromId: countryId, toId: target.id } },
+  });
+  if (rel && rel.opinion >= 55 && !rel.allied && !rel.atWar && rng() < 0.5) {
+    await setFlags(countryId, target.id, { allied: true });
+  }
 }
 
 async function aiWar(

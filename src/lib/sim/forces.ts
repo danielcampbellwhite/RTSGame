@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/db";
 import { UNIT_STATS, forceStrength } from "@/lib/units";
 import { haversineKm } from "@/lib/geo";
+import { pathCrossesWater } from "@/lib/landcheck";
 import { MOVEMENT } from "@/lib/balance";
 import type { UnitType } from "@prisma/client";
 
@@ -141,6 +142,8 @@ export async function orderMove(armyId: string, targetTerritoryId: string): Prom
     prisma.territory.findUnique({ where: { id: targetTerritoryId } }),
   ]);
   if (!to) return false;
+  // Land armies can't walk across open sea — they need an amphibious assault.
+  if (from && pathCrossesWater(from.lng, from.lat, to.lng, to.lat)) return false;
 
   const km = from ? haversineKm(from.lng, from.lat, to.lng, to.lat) : 200;
   // ~40 km/h strategic land speed, clamped to design bounds.
@@ -151,4 +154,33 @@ export async function orderMove(armyId: string, targetTerritoryId: string): Prom
     data: { state: "MOVING", targetTerritoryId, arrivesAt: new Date(Date.now() + ms) },
   });
   return true;
+}
+
+/** Amphibious assault: army crosses water to a target zone, escorted by a fleet
+ *  that must be near the army. Travels at naval speed; engages on arrival. */
+export async function amphibiousAssault(
+  countryId: string,
+  armyId: string,
+  targetTerritoryId: string
+): Promise<"ok" | "no-fleet" | "fail"> {
+  const army = await prisma.army.findUnique({ where: { id: armyId } });
+  if (!army || army.countryId !== countryId || !army.locationTerritoryId) return "fail";
+  const [from, to] = await Promise.all([
+    prisma.territory.findUnique({ where: { id: army.locationTerritoryId } }),
+    prisma.territory.findUnique({ where: { id: targetTerritoryId } }),
+  ]);
+  if (!from || !to) return "fail";
+
+  const fleets = await prisma.fleet.findMany({ where: { countryId } });
+  const escort = fleets.find((f) => Math.hypot(f.lng - from.lng, f.lat - from.lat) <= 3);
+  if (!escort) return "no-fleet";
+
+  const km = haversineKm(from.lng, from.lat, to.lng, to.lat);
+  const ms = Math.max(6 * 3_600_000, (km / 35) * 3_600_000); // naval-speed crossing
+  await prisma.army.update({
+    where: { id: armyId },
+    data: { state: "MOVING", targetTerritoryId, arrivesAt: new Date(Date.now() + ms) },
+  });
+  await sailFleet(escort.id, to.lng, to.lat);
+  return "ok";
 }
