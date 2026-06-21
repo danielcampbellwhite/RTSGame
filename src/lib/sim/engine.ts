@@ -47,6 +47,12 @@ export async function catchUp(gameId: string, now: Date = new Date()): Promise<v
   const stepMs = elapsedMs / steps;
   const rng = mulberry32(game.lastTickAt.getTime() & 0xffffffff);
 
+  // The simulation clock advances by the (speed-scaled) elapsed time. All
+  // discrete deadlines (construction, research, arrivals, cooldowns) live on
+  // this clock, so pausing freezes them and speed accelerates them.
+  const simStart = game.simClock.getTime();
+  const simEndDate = new Date(simStart + elapsedMs);
+
   const countries = (await prisma.country.findMany({
     where: { gameId, isAlive: true },
     include: { territories: { include: { buildings: true } } },
@@ -75,7 +81,7 @@ export async function catchUp(gameId: string, now: Date = new Date()): Promise<v
   for (const f of fleets) {
     f.strength = forceStrength(f.units);
     forceByCountry.set(f.countryId, (forceByCountry.get(f.countryId) ?? 0) + f.strength);
-    if (f.state === "MOVING" && f.arrivesAt && f.arrivesAt.getTime() <= now.getTime()) {
+    if (f.state === "MOVING" && f.arrivesAt && f.arrivesAt.getTime() <= simEndDate.getTime()) {
       f.lng = f.targetLng ?? f.lng;
       f.lat = f.targetLat ?? f.lat;
       f.targetLng = null;
@@ -90,7 +96,7 @@ export async function catchUp(gameId: string, now: Date = new Date()): Promise<v
 
   // ── Resolve arrivals up front so combat can engage this window. ──
   for (const a of armies) {
-    if (a.state === "MOVING" && a.arrivesAt && a.arrivesAt.getTime() <= now.getTime()) {
+    if (a.state === "MOVING" && a.arrivesAt && a.arrivesAt.getTime() <= simEndDate.getTime()) {
       a.locationTerritoryId = a.targetTerritoryId;
       a.targetTerritoryId = null;
       a.arrivesAt = null;
@@ -116,7 +122,7 @@ export async function catchUp(gameId: string, now: Date = new Date()): Promise<v
 
   // ── Integrate ──
   for (let i = 1; i <= steps; i++) {
-    const stepClock = new Date(game.lastTickAt.getTime() + i * stepMs);
+    const stepClock = new Date(simStart + i * stepMs);
 
     if (i % TICK.economyEverySteps === 0) {
       const dt = stepMs * TICK.economyEverySteps;
@@ -131,7 +137,7 @@ export async function catchUp(gameId: string, now: Date = new Date()): Promise<v
     if (i % TICK.worldEventEverySteps === 0) rollWorldEvent(countries, gameId, rng, stepClock, events);
   }
 
-  const completedTech = await resolveCompletions(gameId, now, countriesById, research, events);
+  const completedTech = await resolveCompletions(gameId, simEndDate, countriesById, research, events);
 
   // ── Persist continuous state ──
   await prisma.$transaction([
@@ -197,12 +203,12 @@ export async function catchUp(gameId: string, now: Date = new Date()): Promise<v
       prisma.researchProject.update({ where: { id }, data: { completed: true, progress: 100, completesAt: null } })
     ),
     ...(events.length ? [prisma.gameEvent.createMany({ data: events })] : []),
-    prisma.game.update({ where: { id: gameId }, data: { lastTickAt: now } }),
+    prisma.game.update({ where: { id: gameId }, data: { lastTickAt: now, simClock: simEndDate } }),
   ]);
 
   // ── Discrete passes (own reads/writes) ──
   await checkCollapse(gameId);
-  await runAI(gameId, rng);
+  await runAI(gameId, rng, simEndDate);
 }
 
 // ── ECONOMY ──────────────────────────────────────────────────────────────

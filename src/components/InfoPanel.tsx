@@ -21,7 +21,7 @@ import {
   amphibiousAssaultAction,
 } from "@/app/actions";
 import type { WorldSnapshot } from "@/lib/snapshot";
-import { buildingCost, buildingDurationMs } from "@/lib/buildings";
+import { buildingCost } from "@/lib/buildings";
 import { UNIT_STATS, maxRange } from "@/lib/units";
 import type { BuildingType, UnitType, TradeGood } from "@prisma/client";
 
@@ -424,14 +424,6 @@ const BUILDING_GLYPH: Record<string, string> = {
   RADAR: "📡",
 };
 
-// Construction progress (0–100) for a building still building toward a level.
-function buildProgress(type: string, completesAt: string | null): number {
-  if (!completesAt) return 100;
-  const total = buildingDurationMs(type);
-  const remaining = new Date(completesAt).getTime() - Date.now();
-  return Math.max(0, Math.min(100, ((total - remaining) / total) * 100));
-}
-
 const BUILD_OPTIONS: { type: BuildingType; label: string }[] = [
   { type: "HOUSING", label: "Housing" },
   { type: "FARM", label: "Farm" },
@@ -483,7 +475,7 @@ function TerritoryPanel({ snapshot, territory }: { snapshot: WorldSnapshot; terr
       {territory.buildings.length > 0 && (
         <Section label="Buildings">
           {territory.buildings.map((b) => {
-            const pct = buildProgress(b.type, b.completesAt);
+            const pct = b.progress;
             return (
               <div key={b.type} className="text-[11px]">
                 <div className="flex items-center justify-between">

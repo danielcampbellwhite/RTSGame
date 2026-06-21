@@ -27,6 +27,10 @@ model Game {
   speed         Float    @default(1) // global time multiplier
   // Wall-clock anchor for the catch-up simulation model.
   lastTickAt    DateTime @default(now())
+  // Simulation clock: advances by (wall elapsed × speed) and freezes while
+  // paused. All construction/research/movement/cooldown deadlines live on this
+  // clock, so pause genuinely freezes them and speed accelerates them.
+  simClock      DateTime @default(now())
   createdAt     DateTime @default(now())
   paused        Boolean  @default(false)
 

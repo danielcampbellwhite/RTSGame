@@ -3,8 +3,10 @@ import { TECH_BY_KEY } from "@/data/tech";
 
 export type ResearchStart = "ok" | "exists" | "prereq" | "fail";
 
-/** Begin a research project if prerequisites are met and it isn't already taken. */
-export async function startResearchProject(countryId: string, techKey: string): Promise<ResearchStart> {
+/** Begin a research project if prerequisites are met and it isn't already taken.
+ *  `simNow` is the simulation clock so the completion deadline respects pause
+ *  and game speed. */
+export async function startResearchProject(countryId: string, techKey: string, simNow: Date): Promise<ResearchStart> {
   const node = TECH_BY_KEY[techKey];
   if (!node) return "fail";
 
@@ -33,7 +35,7 @@ export async function startResearchProject(countryId: string, techKey: string): 
       countryId,
       techKey,
       category: node.category,
-      completesAt: new Date(Date.now() + ms),
+      completesAt: new Date(simNow.getTime() + ms),
     },
   });
   return "ok";

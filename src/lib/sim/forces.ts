@@ -117,8 +117,9 @@ export async function recruitNaval(countryId: string, zoneId: string, type: Unit
   return true;
 }
 
-/** Sail a fleet toward a coordinate (slow, distance-based). */
-export async function sailFleet(fleetId: string, lng: number, lat: number): Promise<boolean> {
+/** Sail a fleet toward a coordinate (slow, distance-based). `simNow` is the
+ *  simulation clock so the arrival deadline respects pause and game speed. */
+export async function sailFleet(fleetId: string, lng: number, lat: number, simNow: Date): Promise<boolean> {
   const fleet = await prisma.fleet.findUnique({ where: { id: fleetId } });
   if (!fleet) return false;
   const km = haversineKm(fleet.lng, fleet.lat, lng, lat);
@@ -126,13 +127,13 @@ export async function sailFleet(fleetId: string, lng: number, lat: number): Prom
   const ms = Math.max(2 * 3_600_000, (km / 35) * 3_600_000);
   await prisma.fleet.update({
     where: { id: fleetId },
-    data: { state: "MOVING", targetLng: lng, targetLat: lat, arrivesAt: new Date(Date.now() + ms) },
+    data: { state: "MOVING", targetLng: lng, targetLat: lat, arrivesAt: new Date(simNow.getTime() + ms) },
   });
   return true;
 }
 
 /** Order an army to move toward a target territory; sets arrival time by distance. */
-export async function orderMove(armyId: string, targetTerritoryId: string): Promise<boolean> {
+export async function orderMove(armyId: string, targetTerritoryId: string, simNow: Date): Promise<boolean> {
   const army = await prisma.army.findUnique({ where: { id: armyId } });
   if (!army) return false;
   const [from, to] = await Promise.all([
@@ -151,7 +152,7 @@ export async function orderMove(armyId: string, targetTerritoryId: string): Prom
 
   await prisma.army.update({
     where: { id: armyId },
-    data: { state: "MOVING", targetTerritoryId, arrivesAt: new Date(Date.now() + ms) },
+    data: { state: "MOVING", targetTerritoryId, arrivesAt: new Date(simNow.getTime() + ms) },
   });
   return true;
 }
@@ -161,7 +162,8 @@ export async function orderMove(armyId: string, targetTerritoryId: string): Prom
 export async function amphibiousAssault(
   countryId: string,
   armyId: string,
-  targetTerritoryId: string
+  targetTerritoryId: string,
+  simNow: Date
 ): Promise<"ok" | "no-fleet" | "fail"> {
   const army = await prisma.army.findUnique({ where: { id: armyId } });
   if (!army || army.countryId !== countryId || !army.locationTerritoryId) return "fail";
@@ -179,8 +181,8 @@ export async function amphibiousAssault(
   const ms = Math.max(6 * 3_600_000, (km / 35) * 3_600_000); // naval-speed crossing
   await prisma.army.update({
     where: { id: armyId },
-    data: { state: "MOVING", targetTerritoryId, arrivesAt: new Date(Date.now() + ms) },
+    data: { state: "MOVING", targetTerritoryId, arrivesAt: new Date(simNow.getTime() + ms) },
   });
-  await sailFleet(escort.id, to.lng, to.lat);
+  await sailFleet(escort.id, to.lng, to.lat, simNow);
   return "ok";
 }

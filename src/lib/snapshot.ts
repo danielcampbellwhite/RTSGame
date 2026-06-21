@@ -3,6 +3,7 @@ import { catchUp } from "@/lib/sim/engine";
 import { TECH_TREE, describeEffect } from "@/data/tech";
 import { FOG } from "@/lib/balance";
 import { UNIT_STATS } from "@/lib/units";
+import { buildingDurationMs } from "@/lib/buildings";
 
 export interface CountryDot {
   iso3: string;
@@ -20,7 +21,11 @@ export interface BuildingView {
   type: string;
   level: number;
   buildingToLevel: number | null;
+  // Wall-clock estimate of completion (translated from the sim clock at the
+  // current speed); null when idle.
   completesAt: string | null;
+  // Construction progress 0–100, computed on the (pause/speed-aware) sim clock.
+  progress: number;
 }
 
 export interface TerritoryView {
@@ -156,6 +161,19 @@ export async function getWorldSnapshot(gameId: string): Promise<WorldSnapshot | 
 
   const game = await prisma.game.findUnique({ where: { id: gameId } });
   if (!game) return null;
+
+  // Deadlines are stored on the simulation clock. Translate them to a
+  // wall-clock estimate at the current speed so the client's live countdowns
+  // read correctly; pausing freezes the sim clock, so they stop advancing.
+  const simNowMs = game.simClock.getTime();
+  const gameSpeed = game.speed || 1;
+  const toWallIso = (d: Date | null | undefined): string | null =>
+    d ? new Date(Date.now() + Math.max(0, d.getTime() - simNowMs) / gameSpeed).toISOString() : null;
+  const simProgress = (d: Date | null | undefined, totalMs: number): number => {
+    if (!d || totalMs <= 0) return 100;
+    const remaining = d.getTime() - simNowMs;
+    return Math.max(0, Math.min(100, ((totalMs - remaining) / totalMs) * 100));
+  };
 
   const countries = await prisma.country.findMany({
     where: { gameId },
@@ -337,7 +355,8 @@ export async function getWorldSnapshot(gameId: string): Promise<WorldSnapshot | 
         type: b.type,
         level: b.level,
         buildingToLevel: b.buildingToLevel,
-        completesAt: b.completesAt ? b.completesAt.toISOString() : null,
+        completesAt: toWallIso(b.completesAt),
+        progress: simProgress(b.completesAt, buildingDurationMs(b.type)),
       })),
     })),
     countries: countries.map((c) => ({
@@ -376,7 +395,7 @@ export async function getWorldSnapshot(gameId: string): Promise<WorldSnapshot | 
       strength: a.strength,
       morale: a.morale,
       locationTerritoryId: a.locationTerritoryId,
-      strikeReadyAt: a.strikeReadyAt ? a.strikeReadyAt.toISOString() : null,
+      strikeReadyAt: toWallIso(a.strikeReadyAt),
       units: a.units.map((u) => ({ type: u.type, count: u.count, health: u.health })),
     })),
     fleets: fleets.map((f) => ({
@@ -386,7 +405,7 @@ export async function getWorldSnapshot(gameId: string): Promise<WorldSnapshot | 
       lat: f.lat,
       state: f.state,
       strength: f.strength,
-      strikeReadyAt: f.strikeReadyAt ? f.strikeReadyAt.toISOString() : null,
+      strikeReadyAt: toWallIso(f.strikeReadyAt),
       units: f.units.map((u) => ({ type: u.type, count: u.count })),
     })),
     relations: relations.map((r) => ({
@@ -421,8 +440,7 @@ export async function getWorldSnapshot(gameId: string): Promise<WorldSnapshot | 
       if (!r.completed && node && r.completesAt) {
         const budgetFactor = 50 / Math.max(5, player.researchBudgetPct);
         const total = node.days * 86_400_000 * budgetFactor;
-        const remaining = r.completesAt.getTime() - Date.now();
-        progress = Math.max(0, Math.min(100, ((total - remaining) / total) * 100));
+        progress = simProgress(r.completesAt, total);
       }
       return {
         techKey: r.techKey,

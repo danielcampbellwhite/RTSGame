@@ -13,7 +13,7 @@ type Rng = () => number;
  * nation, with some probability, takes the single highest-weighted action its
  * personality and finances allow. Survival overrides everything.
  */
-export async function runAI(gameId: string, rng: Rng): Promise<void> {
+export async function runAI(gameId: string, rng: Rng, simNow: Date): Promise<void> {
   const countries = await prisma.country.findMany({
     where: { gameId, isPlayer: false, isAlive: true },
   });
@@ -43,10 +43,10 @@ export async function runAI(gameId: string, rng: Rng): Promise<void> {
     };
     const action = weightedPick(weights, rng);
 
-    if (action === "economy") await aiEconomy(c.id, rng);
-    else if (action === "military") await aiMilitary(c.id, rng);
+    if (action === "economy") await aiEconomy(c.id, rng, simNow);
+    else if (action === "military") await aiMilitary(c.id, rng, simNow);
     else if (action === "diplomacy") await aiDiplomacy(gameId, c.id, rng);
-    else if (action === "war") await aiWar(gameId, c, rng);
+    else if (action === "war") await aiWar(gameId, c, rng, simNow);
   }
 
   await joinAlliedWars(gameId, rng);
@@ -80,11 +80,11 @@ async function joinAlliedWars(gameId: string, rng: Rng) {
   }
 }
 
-async function aiEconomy(countryId: string, rng: Rng) {
+async function aiEconomy(countryId: string, rng: Rng, simNow: Date) {
   // Prefer starting economy/energy research; otherwise queue a factory.
   const candidates = TECH_TREE.filter((t) => t.category === "ECONOMY" || t.category === "ENERGY");
   const node = candidates[Math.floor(rng() * candidates.length)];
-  if ((await startResearchProject(countryId, node.key)) === "ok") return;
+  if ((await startResearchProject(countryId, node.key, simNow)) === "ok") return;
 
   const terr = await prisma.territory.findFirst({ where: { countryId }, orderBy: { population: "desc" } });
   if (!terr) return;
@@ -94,17 +94,17 @@ async function aiEconomy(countryId: string, rng: Rng) {
       type: rng() > 0.5 ? "FACTORY" : "POWER_PLANT",
       level: 0,
       buildingToLevel: 1,
-      completesAt: new Date(Date.now() + CONSTRUCTION.medMs),
+      completesAt: new Date(simNow.getTime() + CONSTRUCTION.medMs),
     },
   });
 }
 
-async function aiMilitary(countryId: string, rng: Rng) {
+async function aiMilitary(countryId: string, rng: Rng, simNow: Date) {
   const type: UnitType = rng() > 0.5 ? "INFANTRY" : "TANK";
   const ok = await recruit(countryId, type, 3);
   if (!ok) {
     const mil = TECH_TREE.find((t) => t.category === "MILITARY");
-    if (mil) await startResearchProject(countryId, mil.key);
+    if (mil) await startResearchProject(countryId, mil.key, simNow);
   }
 }
 
@@ -129,7 +129,8 @@ async function aiDiplomacy(gameId: string, countryId: string, rng: Rng) {
 async function aiWar(
   gameId: string,
   c: { id: string; gdp: number; militaryBudgetPct: number },
-  rng: Rng
+  rng: Rng,
+  simNow: Date
 ) {
   // Find a plausibly weaker target the AI already dislikes and isn't at war with.
   const rels = await prisma.diplomaticRelation.findMany({
@@ -151,7 +152,7 @@ async function aiWar(
     getHomeArmy(c.id),
     prisma.territory.findFirst({ where: { countryId: target.id, kind: "CAPITAL" } }),
   ]);
-  if (army.strength > 0 && capital) await orderMove(army.id, capital.id);
+  if (army.strength > 0 && capital) await orderMove(army.id, capital.id, simNow);
 }
 
 function weightedPick(weights: Record<string, number>, rng: Rng): string {

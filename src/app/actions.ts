@@ -108,7 +108,9 @@ export async function queueBuilding(gameId: string, territoryId: string, type: B
     data: { money: { decrement: cost.money }, steel: { decrement: cost.steel } },
   });
 
-  const completesAt = new Date(Date.now() + buildingDurationMs(type));
+  const { simNow, speed } = await gameClock(gameId);
+  const durationMs = buildingDurationMs(type);
+  const completesAt = new Date(simNow.getTime() + durationMs);
   if (existing) {
     await prisma.building.update({
       where: { id: existing.id },
@@ -125,7 +127,7 @@ export async function queueBuilding(gameId: string, territoryId: string, type: B
       scope: "COUNTRY",
       category: "CONSTRUCTION",
       title: `${existing ? "Upgrading" : "Building"} ${prettyType(type)} in ${territory.name} → Lv${targetLevel}`,
-      body: `Ready in ${etaText(completesAt)}.`,
+      body: `Ready in ${etaText(durationMs / speed)}.`,
       countryIso: c.iso3,
       severity: 1,
     },
@@ -203,11 +205,12 @@ export async function strikeZone(gameId: string, armyId: string, targetZoneId: s
   await catchUp(gameId);
   const p = await player(gameId);
   if (!p) return getWorldSnapshot(gameId);
+  const { simNow, speed } = await gameClock(gameId);
   const army = await prisma.army.findFirst({ where: { id: armyId, countryId: p.id }, include: { units: true } });
   if (!army || !army.locationTerritoryId) return getWorldSnapshot(gameId);
-  if (army.strikeReadyAt && army.strikeReadyAt.getTime() > Date.now()) {
+  if (army.strikeReadyAt && army.strikeReadyAt.getTime() > simNow.getTime()) {
     await prisma.gameEvent.create({
-      data: { gameId, scope: "COUNTRY", category: "SYSTEM", title: `${army.name} is still reloading`, body: `Ready to strike again in ${etaText(army.strikeReadyAt)}.`, countryIso: p.iso3, severity: 1 },
+      data: { gameId, scope: "COUNTRY", category: "SYSTEM", title: `${army.name} is still reloading`, body: `Ready to strike again in ${etaText(wallMsUntil(army.strikeReadyAt, simNow, speed))}.`, countryIso: p.iso3, severity: 1 },
     });
     return getWorldSnapshot(gameId);
   }
@@ -229,7 +232,7 @@ export async function strikeZone(gameId: string, armyId: string, targetZoneId: s
 
   const dmg = forceStrength(army.units) * STRIKE.moraleFactor;
   await prisma.territory.update({ where: { id: target.id }, data: { morale: Math.max(0, target.morale - dmg) } });
-  await prisma.army.update({ where: { id: army.id }, data: { strikeReadyAt: new Date(Date.now() + STRIKE.cooldownMs) } });
+  await prisma.army.update({ where: { id: army.id }, data: { strikeReadyAt: new Date(simNow.getTime() + STRIKE.cooldownMs) } });
   const air = army.units.some((u) => UNIT_STATS[u.type].air);
   await prisma.gameEvent.create({
     data: {
@@ -285,10 +288,11 @@ export async function recruitNavalAtZone(gameId: string, zoneId: string, type: U
 export async function sailFleetToZone(gameId: string, fleetId: string, zoneId: string) {
   await catchUp(gameId);
   const p = await player(gameId);
+  const { simNow, speed } = await gameClock(gameId);
   const fleet = await prisma.fleet.findUnique({ where: { id: fleetId } });
   const zone = await prisma.territory.findUnique({ where: { id: zoneId } });
   if (p && fleet && fleet.countryId === p.id && zone) {
-    await sailFleet(fleetId, zone.lng, zone.lat);
+    await sailFleet(fleetId, zone.lng, zone.lat, simNow);
     const after = await prisma.fleet.findUnique({ where: { id: fleetId } });
     await prisma.gameEvent.create({
       data: {
@@ -296,7 +300,7 @@ export async function sailFleetToZone(gameId: string, fleetId: string, zoneId: s
         scope: "COUNTRY",
         category: "SYSTEM",
         title: `Fleet sailing to ${zone.name}`,
-        body: after?.arrivesAt ? `Arrives in ${etaText(after.arrivesAt)}.` : undefined,
+        body: after?.arrivesAt ? `Arrives in ${etaText(wallMsUntil(after.arrivesAt, simNow, speed))}.` : undefined,
         countryIso: p.iso3,
         severity: 1,
       },
@@ -310,11 +314,12 @@ export async function fleetStrike(gameId: string, fleetId: string, zoneId: strin
   await catchUp(gameId);
   const p = await player(gameId);
   if (!p) return getWorldSnapshot(gameId);
+  const { simNow, speed } = await gameClock(gameId);
   const fleet = await prisma.fleet.findFirst({ where: { id: fleetId, countryId: p.id }, include: { units: true } });
   if (!fleet) return getWorldSnapshot(gameId);
-  if (fleet.strikeReadyAt && fleet.strikeReadyAt.getTime() > Date.now()) {
+  if (fleet.strikeReadyAt && fleet.strikeReadyAt.getTime() > simNow.getTime()) {
     await prisma.gameEvent.create({
-      data: { gameId, scope: "COUNTRY", category: "SYSTEM", title: `Fleet guns are reloading`, body: `Ready to bombard again in ${etaText(fleet.strikeReadyAt)}.`, countryIso: p.iso3, severity: 1 },
+      data: { gameId, scope: "COUNTRY", category: "SYSTEM", title: `Fleet guns are reloading`, body: `Ready to bombard again in ${etaText(wallMsUntil(fleet.strikeReadyAt, simNow, speed))}.`, countryIso: p.iso3, severity: 1 },
     });
     return getWorldSnapshot(gameId);
   }
@@ -327,7 +332,7 @@ export async function fleetStrike(gameId: string, fleetId: string, zoneId: strin
   }
   const dmg = forceStrength(fleet.units) * STRIKE.moraleFactor;
   await prisma.territory.update({ where: { id: target.id }, data: { morale: Math.max(0, target.morale - dmg) } });
-  await prisma.fleet.update({ where: { id: fleet.id }, data: { strikeReadyAt: new Date(Date.now() + STRIKE.cooldownMs) } });
+  await prisma.fleet.update({ where: { id: fleet.id }, data: { strikeReadyAt: new Date(simNow.getTime() + STRIKE.cooldownMs) } });
   await prisma.gameEvent.create({ data: { gameId, scope: "REGIONAL", category: "BATTLE", title: `Naval bombardment on ${target.name}`, body: `Morale −${dmg.toFixed(0)}.`, countryIso: p.iso3, severity: 2 } });
   revalidatePath("/");
   return getWorldSnapshot(gameId);
@@ -336,9 +341,10 @@ export async function fleetStrike(gameId: string, fleetId: string, zoneId: strin
 export async function moveArmy(gameId: string, armyId: string, territoryId: string) {
   await catchUp(gameId);
   const p = await player(gameId);
+  const { simNow, speed } = await gameClock(gameId);
   const army = await prisma.army.findUnique({ where: { id: armyId } });
   if (p && army && army.countryId === p.id) {
-    const ok = await orderMove(armyId, territoryId);
+    const ok = await orderMove(armyId, territoryId, simNow);
     const t = await prisma.territory.findUnique({ where: { id: territoryId } });
     if (!ok) {
       await prisma.gameEvent.create({
@@ -353,7 +359,7 @@ export async function moveArmy(gameId: string, armyId: string, territoryId: stri
           scope: "COUNTRY",
           category: enemy ? "BATTLE" : "SYSTEM",
           title: `${army.name} ${enemy ? "advancing on" : "marching to"} ${t?.name ?? "target"}`,
-          body: after?.arrivesAt ? `Arrives in ${etaText(after.arrivesAt)}.` : undefined,
+          body: after?.arrivesAt ? `Arrives in ${etaText(wallMsUntil(after.arrivesAt, simNow, speed))}.` : undefined,
           countryIso: p.iso3,
           severity: enemy ? 2 : 1,
         },
@@ -369,7 +375,8 @@ export async function amphibiousAssaultAction(gameId: string, armyId: string, te
   await catchUp(gameId);
   const p = await player(gameId);
   if (!p) return getWorldSnapshot(gameId);
-  const res = await amphibiousAssault(p.id, armyId, territoryId);
+  const { simNow, speed } = await gameClock(gameId);
+  const res = await amphibiousAssault(p.id, armyId, territoryId, simNow);
   const t = await prisma.territory.findUnique({ where: { id: territoryId } });
   if (res !== "ok") {
     await prisma.gameEvent.create({
@@ -391,7 +398,7 @@ export async function amphibiousAssaultAction(gameId: string, armyId: string, te
         scope: "COUNTRY",
         category: "BATTLE",
         title: `Amphibious assault launched on ${t?.name ?? "target"}`,
-        body: after?.arrivesAt ? `Lands in ${etaText(after.arrivesAt)}.` : undefined,
+        body: after?.arrivesAt ? `Lands in ${etaText(wallMsUntil(after.arrivesAt, simNow, speed))}.` : undefined,
         countryIso: p.iso3,
         severity: 2,
       },
@@ -514,7 +521,8 @@ export async function startResearch(gameId: string, techKey: string) {
   if (!p) return getWorldSnapshot(gameId);
   const node = TECH_BY_KEY[techKey];
   const name = node?.name ?? techKey;
-  const res = await startResearchProject(p.id, techKey);
+  const { simNow } = await gameClock(gameId);
+  const res = await startResearchProject(p.id, techKey, simNow);
   const msg: Record<typeof res, { title: string; body?: string; sev: number }> = {
     ok: { title: `Research started: ${name}`, body: "Track it under the Research tab.", sev: 1 },
     exists: { title: `${name} is already researched or in progress`, sev: 1 },
@@ -542,12 +550,22 @@ function prettyType(type: string): string {
     .join(" ");
 }
 
-/** Short human countdown ("3h", "45m") for a future timestamp. */
-function etaText(at: Date): string {
-  const ms = at.getTime() - Date.now();
+/** Short human countdown ("3h", "45m") for a wall-clock duration in ms. */
+function etaText(ms: number): string {
   if (ms <= 0) return "moments";
   const h = ms / 3_600_000;
   if (h >= 24) return `${(h / 24).toFixed(1)}d`;
   if (h >= 1) return `${h.toFixed(0)}h`;
   return `${Math.max(1, Math.round(ms / 60_000))}m`;
+}
+
+/** The simulation clock + speed for a game (read after catchUp has settled). */
+async function gameClock(gameId: string): Promise<{ simNow: Date; speed: number }> {
+  const g = await prisma.game.findUnique({ where: { id: gameId }, select: { simClock: true, speed: true } });
+  return { simNow: g?.simClock ?? new Date(), speed: g?.speed || 1 };
+}
+
+/** Wall-clock ms until a sim-time deadline, given the sim clock and speed. */
+function wallMsUntil(deadlineSim: Date, simNow: Date, speed: number): number {
+  return Math.max(0, deadlineSim.getTime() - simNow.getTime()) / (speed || 1);
 }
