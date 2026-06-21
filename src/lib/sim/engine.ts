@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/db";
-import { TICK, ECONOMY, MORALE, WORLD_EVENTS, RESEARCH, BUDGET } from "@/lib/balance";
+import { TICK, ECONOMY, MORALE, WORLD_EVENTS, RESEARCH, BUDGET, SIM } from "@/lib/balance";
 import { forceStrength } from "@/lib/units";
 import { TECH_BY_KEY, type TechNode } from "@/data/tech";
 import { stepTrade } from "@/lib/sim/trade";
@@ -40,7 +40,9 @@ export async function catchUp(gameId: string, now: Date = new Date()): Promise<v
   // The player's chosen speed multiplies how much simulation time elapses per
   // real second. Pause is handled above by skipping (and the unpause action
   // resets lastTickAt so paused wall-clock time is never simulated).
-  const elapsedMs = (now.getTime() - game.lastTickAt.getTime()) * (game.speed || 1);
+  // In-game time runs SIM.baseRate × the player's speed faster than real time,
+  // so a real-world-days campaign condenses into a couple of hours.
+  const elapsedMs = (now.getTime() - game.lastTickAt.getTime()) * (game.speed || 1) * SIM.baseRate;
   if (elapsedMs < TICK.stepMs) return;
 
   const steps = Math.min(Math.floor(elapsedMs / TICK.stepMs), TICK.maxSteps);

@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/db";
 import { catchUp } from "@/lib/sim/engine";
 import { TECH_TREE, describeEffect } from "@/data/tech";
-import { FOG } from "@/lib/balance";
+import { FOG, SIM } from "@/lib/balance";
 import { UNIT_STATS } from "@/lib/units";
 import { buildingDurationMs } from "@/lib/buildings";
 
@@ -166,7 +166,8 @@ export async function getWorldSnapshot(gameId: string): Promise<WorldSnapshot | 
   // wall-clock estimate at the current speed so the client's live countdowns
   // read correctly; pausing freezes the sim clock, so they stop advancing.
   const simNowMs = game.simClock.getTime();
-  const gameSpeed = game.speed || 1;
+  // Effective multiplier of in-game time over real time.
+  const gameSpeed = (game.speed || 1) * SIM.baseRate;
   const toWallIso = (d: Date | null | undefined): string | null =>
     d ? new Date(Date.now() + Math.max(0, d.getTime() - simNowMs) / gameSpeed).toISOString() : null;
   const simProgress = (d: Date | null | undefined, totalMs: number): number => {
@@ -309,7 +310,7 @@ export async function getWorldSnapshot(gameId: string): Promise<WorldSnapshot | 
   return {
     gameId,
     game: {
-      ageDays: (Date.now() - game.createdAt.getTime()) / 86_400_000,
+      ageDays: Math.max(0, (game.simClock.getTime() - game.createdAt.getTime()) / 86_400_000),
       paused: game.paused,
       speed: game.speed,
     },

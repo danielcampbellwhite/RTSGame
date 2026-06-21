@@ -123,7 +123,7 @@ export async function sailFleet(fleetId: string, lng: number, lat: number, simNo
   const fleet = await prisma.fleet.findUnique({ where: { id: fleetId } });
   if (!fleet) return false;
   const km = haversineKm(fleet.lng, fleet.lat, lng, lat);
-  // ~35 km/h cruising; ships are slow — days for long crossings.
+  // ~35 km/h cruising; ships are slow — in-game hours for long crossings.
   const ms = Math.max(2 * 3_600_000, (km / 35) * 3_600_000);
   await prisma.fleet.update({
     where: { id: fleetId },

@@ -18,6 +18,7 @@ const TIER_COST: Record<BuildTier, { money: number; steel: number }> = {
   slow: { money: 20, steel: 10 },
 };
 
+// In-game durations (compressed at runtime by SIM.baseRate × speed).
 const TIER_MS: Record<BuildTier, number> = {
   fast: 4 * 3_600_000, // 4h
   med: 24 * 3_600_000, // 1d

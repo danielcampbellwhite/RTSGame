@@ -1,6 +1,20 @@
 // Central tuning table. All gameplay constants live here so balancing is a
 // single-file iteration. Values are intentionally simple and readable.
 
+export const SIM = {
+  /** Global time compression: in-game time runs this many times faster than
+   *  real time at the player's "1×" speed. The whole simulation — economy,
+   *  combat, construction, research, movement — is scaled uniformly by this,
+   *  so a full real-world-days campaign plays out in a couple of hours.
+   *  Effective multiplier = SIM.baseRate × the player's speed setting. */
+  baseRate: 600,
+  /** Default player speed setting for a new game (multiplies baseRate). */
+  defaultSpeed: 1,
+  /** Player speed bounds (multiplies baseRate). */
+  minSpeed: 0.25,
+  maxSpeed: 8,
+} as const;
+
 export const TICK = {
   /** Logical step size for catch-up integration (ms). */
   stepMs: 60_000,
@@ -52,6 +66,9 @@ export const BUDGET = {
   minutesPerDay: 1440,
 } as const;
 
+// Durations are in *in-game* time. The game runs many times faster than real
+// time (see SIM.defaultSpeed / the speed control), so these compress into
+// minutes of play — a full campaign in a couple of hours.
 export const CONSTRUCTION = {
   // Build duration (ms) and steel/money cost by building "tier".
   fastMs: 4 * 3_600_000, // 4h  (housing, farm, road)

@@ -4,7 +4,7 @@ import { prisma } from "@/lib/db";
 import { catchUp } from "@/lib/sim/engine";
 import { createGameWorld } from "@/lib/world";
 import { getWorldSnapshot, type WorldSnapshot } from "@/lib/snapshot";
-import { DIPLOMACY, STRIKE } from "@/lib/balance";
+import { DIPLOMACY, STRIKE, SIM } from "@/lib/balance";
 import { buildingCost, buildingDurationMs } from "@/lib/buildings";
 import { UNIT_STATS, maxRange, forceStrength } from "@/lib/units";
 import { recruit, orderMove, recruitAt, recruitNaval, sailFleet, amphibiousAssault } from "@/lib/sim/forces";
@@ -151,7 +151,7 @@ export async function setPaused(gameId: string, paused: boolean) {
 
 export async function setSpeed(gameId: string, speed: number) {
   await catchUp(gameId);
-  await prisma.game.update({ where: { id: gameId }, data: { speed: Math.max(0.5, Math.min(10, speed)) } });
+  await prisma.game.update({ where: { id: gameId }, data: { speed: Math.max(SIM.minSpeed, Math.min(SIM.maxSpeed, speed)) } });
   revalidatePath("/");
   return getWorldSnapshot(gameId);
 }
@@ -559,10 +559,12 @@ function etaText(ms: number): string {
   return `${Math.max(1, Math.round(ms / 60_000))}m`;
 }
 
-/** The simulation clock + speed for a game (read after catchUp has settled). */
+/** The simulation clock + effective speed (player speed × global compression)
+ *  for a game, read after catchUp has settled. `speed` converts in-game
+ *  durations to real wall-clock time. */
 async function gameClock(gameId: string): Promise<{ simNow: Date; speed: number }> {
   const g = await prisma.game.findUnique({ where: { id: gameId }, select: { simClock: true, speed: true } });
-  return { simNow: g?.simClock ?? new Date(), speed: g?.speed || 1 };
+  return { simNow: g?.simClock ?? new Date(), speed: (g?.speed || 1) * SIM.baseRate };
 }
 
 /** Wall-clock ms until a sim-time deadline, given the sim clock and speed. */

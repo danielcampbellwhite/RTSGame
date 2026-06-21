@@ -4,7 +4,8 @@ import { useTransition } from "react";
 import { useGameStore } from "@/store/game";
 import { setPaused, setSpeed } from "@/app/actions";
 
-const SPEEDS = [1, 2, 5];
+// Multipliers on top of the global time compression (see SIM.baseRate).
+const SPEEDS = [0.5, 1, 2, 5];
 
 export default function TimeControl() {
   const snapshot = useGameStore((s) => s.snapshot);
