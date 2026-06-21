@@ -51,6 +51,45 @@ export async function recruit(countryId: string, type: UnitType, count: number):
   return true;
 }
 
+/** Recruit `count` units of `type` into the army garrisoning a specific zone. */
+export async function recruitAt(countryId: string, territoryId: string, type: UnitType, count: number): Promise<boolean> {
+  const stat = UNIT_STATS[type];
+  const [country, terr] = await Promise.all([
+    prisma.country.findUnique({ where: { id: countryId } }),
+    prisma.territory.findUnique({ where: { id: territoryId } }),
+  ]);
+  if (!country || !terr) return false;
+
+  const money = stat.moneyCost * count;
+  const manpower = stat.manpowerCost * count;
+  if (country.money < money || country.manpower < manpower) return false;
+
+  let army = await prisma.army.findFirst({
+    where: { countryId, locationTerritoryId: territoryId },
+    include: { units: true },
+  });
+  if (!army) {
+    army = await prisma.army.create({
+      data: { countryId, name: `${terr.name} Garrison`, locationTerritoryId: territoryId },
+      include: { units: true },
+    });
+  }
+
+  const existingUnit = army.units.find((u) => u.type === type);
+  if (existingUnit) {
+    await prisma.unit.update({ where: { id: existingUnit.id }, data: { count: existingUnit.count + count } });
+  } else {
+    await prisma.unit.create({ data: { armyId: army.id, type, count } });
+  }
+  await prisma.country.update({
+    where: { id: countryId },
+    data: { money: country.money - money, manpower: country.manpower - manpower },
+  });
+  const units = await prisma.unit.findMany({ where: { armyId: army.id } });
+  await prisma.army.update({ where: { id: army.id }, data: { strength: forceStrength(units) } });
+  return true;
+}
+
 /** Order an army to move toward a target territory; sets arrival time by distance. */
 export async function orderMove(armyId: string, targetTerritoryId: string): Promise<boolean> {
   const army = await prisma.army.findUnique({ where: { id: armyId } });

@@ -6,7 +6,7 @@ import { createGameWorld } from "@/lib/world";
 import { getWorldSnapshot, type WorldSnapshot } from "@/lib/snapshot";
 import { DIPLOMACY } from "@/lib/balance";
 import { buildingCost, buildingDurationMs } from "@/lib/buildings";
-import { recruit, orderMove } from "@/lib/sim/forces";
+import { recruit, orderMove, recruitAt } from "@/lib/sim/forces";
 import { startResearchProject } from "@/lib/sim/research";
 import { declareWar as declareWarCore, endWar, adjustOpinion, setFlags } from "@/lib/sim/diplomacy";
 import type { BuildingType, UnitType, TradeGood } from "@prisma/client";
@@ -133,6 +133,26 @@ export async function recruitUnit(gameId: string, type: UnitType, count: number)
   await catchUp(gameId);
   const p = await player(gameId);
   if (p) await recruit(p.id, type, count);
+  revalidatePath("/");
+  return getWorldSnapshot(gameId);
+}
+
+/** Recruit a unit into a zone's garrison. Requires the zone to be ours and have a barracks. */
+export async function recruitAtZone(gameId: string, territoryId: string, type: UnitType, count: number) {
+  await catchUp(gameId);
+  const p = await player(gameId);
+  if (!p) return getWorldSnapshot(gameId);
+  const terr = await prisma.territory.findUnique({ where: { id: territoryId }, include: { buildings: true } });
+  if (!terr || terr.countryId !== p.id) return getWorldSnapshot(gameId);
+
+  const hasBarracks = terr.buildings.some((b) => b.type === "BARRACKS" && b.level >= 1);
+  if (!hasBarracks) {
+    await prisma.gameEvent.create({
+      data: { gameId, scope: "COUNTRY", category: "SYSTEM", title: `${terr.name} needs a Barracks to recruit`, countryIso: p.iso3, severity: 2 },
+    });
+    return getWorldSnapshot(gameId);
+  }
+  await recruitAt(p.id, territoryId, type, count);
   revalidatePath("/");
   return getWorldSnapshot(gameId);
 }

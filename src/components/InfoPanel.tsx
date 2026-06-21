@@ -5,7 +5,7 @@ import { useGameStore } from "@/store/game";
 import {
   setBudget,
   queueBuilding,
-  recruitUnit,
+  recruitAtZone,
   moveArmy,
   declareWar,
   proposePeace,
@@ -17,6 +17,7 @@ import {
 } from "@/app/actions";
 import type { WorldSnapshot } from "@/lib/snapshot";
 import { buildingCost } from "@/lib/buildings";
+import { UNIT_STATS } from "@/lib/units";
 import type { BuildingType, UnitType, TradeGood } from "@prisma/client";
 
 // Short "ready in" countdown for an ISO timestamp.
@@ -170,33 +171,28 @@ const RECRUITABLE: { type: UnitType; label: string }[] = [
 function MilitaryTab({ snapshot }: { snapshot: WorldSnapshot }) {
   const { run, isPending } = useAction();
   const strongest = [...snapshot.armies].sort((a, b) => b.strength - a.strength)[0];
+  const zoneName = new Map(snapshot.allZones.map((z) => [z.id, z.name]));
 
   return (
     <div className="space-y-2">
-      <Section label="Recruit (into 1st Army)">
-        <div className="grid grid-cols-2 gap-1">
-          {RECRUITABLE.map((u) => (
-            <Btn key={u.type} small disabled={isPending} onClick={() => run(() => recruitUnit(snapshot.gameId, u.type, 1))}>
-              + {u.label}
-            </Btn>
-          ))}
-        </div>
-      </Section>
-
-      <Section label="Armies">
-        {snapshot.armies.length === 0 && <Empty>No standing army.</Empty>}
+      <Section label="Garrisons">
+        {snapshot.armies.length === 0 && <Empty>No forces yet. Build a Barracks in a zone, then recruit there.</Empty>}
         {snapshot.armies.map((a) => (
           <div key={a.id} className="rounded border border-[var(--wd-border)] p-1 text-[11px]">
             <div className="flex justify-between">
               <span className="text-[var(--wd-cyan)]">{a.name}</span>
               <span className="text-cyan-200/75">{a.state}</span>
             </div>
+            <div className="text-cyan-200/60">
+              📍 {a.locationTerritoryId ? zoneName.get(a.locationTerritoryId) ?? "—" : "—"}
+            </div>
             <div className="text-cyan-200/85">
-              Strength {a.strength.toFixed(0)} · {a.units.map((u) => `${u.count} ${u.type.toLowerCase()}`).join(", ") || "empty"}
+              Str {a.strength.toFixed(0)} · {a.units.map((u) => `${u.count} ${u.type.toLowerCase()}`).join(", ") || "empty"}
             </div>
           </div>
         ))}
       </Section>
+      <p className="text-[10px] text-cyan-200/60">Recruit from a zone with a Barracks (tap a zone → Build → Barracks).</p>
 
       {snapshot.warTargets.length > 0 && (
         <Section label="Offensives">
@@ -462,8 +458,42 @@ function TerritoryPanel({ snapshot, territory }: { snapshot: WorldSnapshot; terr
         <div className="text-[10px] text-cyan-200/70">Cost: ₵ treasury + ▮ steel. Higher levels cost more.</div>
       </Section>
 
+      {byType.has("BARRACKS") ? (
+        <Section label="Recruit Garrison">
+          <div className="grid grid-cols-2 gap-1">
+            {RECRUITABLE.map((u) => {
+              const stat = UNIT_STATS[u.type];
+              const afford = money >= stat.moneyCost && snapshot.player.resources.manpower >= stat.manpowerCost;
+              return (
+                <Btn key={u.type} small disabled={isPending || !afford} onClick={() => run(() => recruitAtZone(snapshot.gameId, territory.id, u.type, 1))}>
+                  + {u.label}
+                  <span className="ml-1 text-[9px] text-cyan-200/70">{stat.moneyCost}₵</span>
+                </Btn>
+              );
+            })}
+          </div>
+        </Section>
+      ) : (
+        <div className="text-[10px] text-cyan-200/60">Build a Barracks here to recruit a garrison.</div>
+      )}
+
+      {(() => {
+        const garrison = snapshot.armies.filter((a) => a.locationTerritoryId === territory.id);
+        if (!garrison.length) return null;
+        return (
+          <Section label="Garrison">
+            {garrison.map((a) => (
+              <div key={a.id} className="text-[11px] text-cyan-200/85">
+                {a.units.map((u) => `${u.count} ${u.type.toLowerCase()}`).join(", ") || "empty"}{" "}
+                <span className="text-cyan-200/60">({a.state})</span>
+              </div>
+            ))}
+          </Section>
+        );
+      })()}
+
       {snapshot.armies.length > 0 && (
-        <Section label="Reposition Army">
+        <Section label="Move Army Here">
           {snapshot.armies.map((a) => (
             <Btn key={a.id} small disabled={isPending} onClick={() => run(() => moveArmy(snapshot.gameId, a.id, territory.id))}>
               Move {a.name} here
