@@ -21,7 +21,7 @@ import {
   amphibiousAssaultAction,
 } from "@/app/actions";
 import type { WorldSnapshot } from "@/lib/snapshot";
-import { buildingCost } from "@/lib/buildings";
+import { buildingCost, buildingDurationMs } from "@/lib/buildings";
 import { UNIT_STATS, maxRange } from "@/lib/units";
 import type { BuildingType, UnitType, TradeGood } from "@prisma/client";
 
@@ -412,6 +412,26 @@ function ResearchTab({ snapshot }: { snapshot: WorldSnapshot }) {
 }
 
 // ── TERRITORY / COUNTRY PANELS ─────────────────────────────────────────────
+const BUILDING_GLYPH: Record<string, string> = {
+  HOUSING: "🏠",
+  FARM: "🌾",
+  FACTORY: "🏭",
+  POWER_PLANT: "⚡",
+  BARRACKS: "🪖",
+  AIR_BASE: "✈️",
+  NAVAL_BASE: "⚓",
+  PORT: "⚓",
+  RADAR: "📡",
+};
+
+// Construction progress (0–100) for a building still building toward a level.
+function buildProgress(type: string, completesAt: string | null): number {
+  if (!completesAt) return 100;
+  const total = buildingDurationMs(type);
+  const remaining = new Date(completesAt).getTime() - Date.now();
+  return Math.max(0, Math.min(100, ((total - remaining) / total) * 100));
+}
+
 const BUILD_OPTIONS: { type: BuildingType; label: string }[] = [
   { type: "HOUSING", label: "Housing" },
   { type: "FARM", label: "Farm" },
@@ -462,16 +482,29 @@ function TerritoryPanel({ snapshot, territory }: { snapshot: WorldSnapshot; terr
 
       {territory.buildings.length > 0 && (
         <Section label="Buildings">
-          {territory.buildings.map((b) => (
-            <div key={b.type} className="flex items-center justify-between text-[11px]">
-              <span className="text-cyan-200/90">
-                {b.type.replace(/_/g, " ").toLowerCase()} <span className="text-[var(--wd-cyan)]">Lv{b.level}</span>
-              </span>
-              {b.completesAt ? (
-                <span className="text-[var(--wd-amber)]">→ Lv{b.buildingToLevel} · {eta(b.completesAt)}</span>
-              ) : null}
-            </div>
-          ))}
+          {territory.buildings.map((b) => {
+            const pct = buildProgress(b.type, b.completesAt);
+            return (
+              <div key={b.type} className="text-[11px]">
+                <div className="flex items-center justify-between">
+                  <span className="text-cyan-200/90">
+                    <span className="mr-1">{BUILDING_GLYPH[b.type] ?? "•"}</span>
+                    {b.type.replace(/_/g, " ").toLowerCase()} <span className="text-[var(--wd-cyan)]">Lv{b.level}</span>
+                  </span>
+                  {b.completesAt ? (
+                    <span className="text-[var(--wd-amber)]">→ Lv{b.buildingToLevel} · {eta(b.completesAt)}</span>
+                  ) : (
+                    <span className="text-cyan-200/50">idle</span>
+                  )}
+                </div>
+                {b.completesAt && (
+                  <div className="mt-0.5 h-1 w-full rounded bg-[var(--wd-border)]">
+                    <div className="h-full rounded bg-[var(--wd-amber)]" style={{ width: `${pct}%` }} />
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </Section>
       )}
 
@@ -490,33 +523,58 @@ function TerritoryPanel({ snapshot, territory }: { snapshot: WorldSnapshot; terr
                 disabled={isPending || busy || !afford}
                 onClick={() => run(() => queueBuilding(snapshot.gameId, territory.id, b.type))}
               >
-                {existing ? `▲ ${b.label} Lv${target}` : `+ ${b.label}`}
-                <span className="ml-1 text-[9px] text-cyan-200/70">{cost.money}₵ {cost.steel}▮</span>
+                {busy ? `⏳ ${b.label} ${eta(existing!.completesAt!)}` : existing ? `▲ ${b.label} Lv${target}` : `+ ${b.label}`}
+                {!busy && <span className="ml-1 text-[9px] text-cyan-200/70">{cost.money}₵ {cost.steel}▮</span>}
               </Btn>
             );
           })}
         </div>
-        <div className="text-[10px] text-cyan-200/70">Cost: ₵ treasury + ▮ steel. Higher levels cost more.</div>
+        <div className="text-[10px] text-cyan-200/70">
+          Cost: ₵ treasury + ▮ steel. Each building upgrades on its own timer — start several in parallel, but only one upgrade per building at a time.
+        </div>
       </Section>
 
-      {byType.has("BARRACKS") ? (
-        <Section label="Recruit Garrison">
-          <div className="grid grid-cols-2 gap-1">
-            {RECRUITABLE.map((u) => {
-              const stat = UNIT_STATS[u.type];
-              const afford = money >= stat.moneyCost && snapshot.player.resources.manpower >= stat.manpowerCost;
-              return (
-                <Btn key={u.type} small disabled={isPending || !afford} onClick={() => run(() => recruitAtZone(snapshot.gameId, territory.id, u.type, 1))}>
-                  + {u.label}
-                  <span className="ml-1 text-[9px] text-cyan-200/70">{stat.moneyCost}₵</span>
-                </Btn>
-              );
-            })}
-          </div>
-        </Section>
-      ) : (
-        <div className="text-[10px] text-cyan-200/60">Build a Barracks here to recruit a garrison.</div>
-      )}
+      {(() => {
+        const barracks = byType.get("BARRACKS");
+        if (!barracks) {
+          return <div className="text-[10px] text-cyan-200/60">Build a Barracks here to recruit a garrison.</div>;
+        }
+        if (barracks.level < 1) {
+          return (
+            <Section label="Recruit Garrison">
+              <div className="text-[10px] text-[var(--wd-amber)]">
+                Barracks under construction{barracks.completesAt ? ` · ${eta(barracks.completesAt)}` : ""}. Finish it to recruit.
+              </div>
+            </Section>
+          );
+        }
+        return (
+          <Section label="Recruit Garrison">
+            <div className="grid grid-cols-2 gap-1">
+              {RECRUITABLE.map((u) => {
+                const stat = UNIT_STATS[u.type];
+                const afford = money >= stat.moneyCost && snapshot.player.resources.manpower >= stat.manpowerCost;
+                return (
+                  <Btn
+                    key={u.type}
+                    small
+                    disabled={isPending || !afford}
+                    onClick={() => run(() => recruitAtZone(snapshot.gameId, territory.id, u.type, 1))}
+                  >
+                    + {u.label}
+                    <span className="ml-1 text-[9px] text-cyan-200/70">
+                      {stat.moneyCost}₵ {stat.manpowerCost}⚇
+                    </span>
+                  </Btn>
+                );
+              })}
+            </div>
+            <div className="text-[10px] text-cyan-200/70">
+              Greyed out = not enough ₵ treasury or ⚇ manpower. Recruits join this zone&apos;s garrison instantly.
+            </div>
+          </Section>
+        );
+      })()}
 
       {(() => {
         const yard = byType.get("NAVAL_BASE") ?? byType.get("PORT");

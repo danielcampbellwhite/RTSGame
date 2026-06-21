@@ -120,6 +120,20 @@ function zonePoints(s: WorldSnapshot): GeoJSON.FeatureCollection {
   };
 }
 
+// One chip per player zone that has buildings, showing what's built there.
+function buildingPoints(s: WorldSnapshot): GeoJSON.FeatureCollection {
+  return {
+    type: "FeatureCollection",
+    features: s.territories
+      .filter((t) => t.buildings.length > 0)
+      .map((t) => ({
+        type: "Feature",
+        properties: { sig: buildingChipSpec(t.buildings).sig },
+        geometry: { type: "Point", coordinates: [t.lng, t.lat] },
+      })),
+  };
+}
+
 // ── Canvas icon generators (no font glyphs required) ──────────────────────
 function unitChip(letter: string, bg: string) {
   const s = 44;
@@ -247,6 +261,67 @@ function zoneIcon(kind: string) {
 
 const ECON_B = new Set(["FACTORY", "POWER_PLANT", "FARM", "PORT", "RAILWAY", "ROAD", "AIRPORT", "HOSPITAL", "HOUSING"]);
 const MIL_B = new Set(["BARRACKS", "AIR_BASE", "NAVAL_BASE", "MISSILE_SILO", "RADAR"]);
+
+// Single-glyph codes for building types, drawn as a chip beneath each zone.
+const BUILDING_LETTER: Record<string, string> = {
+  HOUSING: "H",
+  FARM: "A",
+  FACTORY: "F",
+  POWER_PLANT: "P",
+  BARRACKS: "B",
+  AIR_BASE: "Y",
+  NAVAL_BASE: "N",
+  PORT: "N",
+  RADAR: "R",
+};
+
+// A compact chip listing a zone's buildings (one glyph each) with an amber dot
+// while anything there is still under construction. Cached by signature.
+function buildingChip(letters: string[], constructing: boolean) {
+  const cell = 16;
+  const padX = 4;
+  const w = Math.max(cell, letters.length * cell + padX * 2);
+  const h = 22;
+  const cv = document.createElement("canvas");
+  cv.width = w;
+  cv.height = h;
+  const ctx = cv.getContext("2d")!;
+  // rounded backing
+  const r = 5;
+  ctx.beginPath();
+  ctx.moveTo(r, 1);
+  ctx.arcTo(w - 1, 1, w - 1, h - 1, r);
+  ctx.arcTo(w - 1, h - 1, 1, h - 1, r);
+  ctx.arcTo(1, h - 1, 1, 1, r);
+  ctx.arcTo(1, 1, w - 1, 1, r);
+  ctx.closePath();
+  ctx.fillStyle = "rgba(4,12,20,0.82)";
+  ctx.fill();
+  ctx.lineWidth = 1.5;
+  ctx.strokeStyle = "#16364d";
+  ctx.stroke();
+  ctx.font = "bold 12px ui-monospace, monospace";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillStyle = "#c8f4ff";
+  letters.forEach((l, i) => ctx.fillText(l, padX + cell * i + cell / 2, h / 2 + 1));
+  if (constructing) {
+    ctx.beginPath();
+    ctx.arc(w - 4, 4, 3.5, 0, Math.PI * 2);
+    ctx.fillStyle = "#f59e0b";
+    ctx.fill();
+  }
+  return { width: w, height: h, data: new Uint8Array(ctx.getImageData(0, 0, w, h).data.buffer) };
+}
+
+// Signature + ordered glyphs for a zone's buildings, used as the chip image id.
+function buildingChipSpec(buildings: { type: string; completesAt: string | null }[]) {
+  const sorted = [...buildings].sort((a, b) => a.type.localeCompare(b.type));
+  const letters = sorted.map((b) => BUILDING_LETTER[b.type] ?? "•");
+  const constructing = sorted.some((b) => b.completesAt);
+  const sig = `bld:${letters.join("")}${constructing ? "*" : ""}`;
+  return { sig, letters, constructing };
+}
 
 // High-level overview card shown over a zone on first tap.
 function overviewHTML(
@@ -561,6 +636,22 @@ export default function WorldMap() {
           layout: { "icon-image": ["concat", "zone-", ["get", "kind"]], "icon-size": 0.5, "icon-allow-overlap": true, "icon-ignore-placement": true },
         });
 
+        // Building chips under each of the player's zones (visible when zoomed in).
+        map.addSource("zonebuildings", { type: "geojson", data: empty });
+        map.addLayer({
+          id: "zone-buildings",
+          type: "symbol",
+          source: "zonebuildings",
+          minzoom: 3.2,
+          layout: {
+            "icon-image": ["get", "sig"],
+            "icon-size": 0.5,
+            "icon-offset": [0, 34],
+            "icon-allow-overlap": true,
+            "icon-ignore-placement": true,
+          },
+        });
+
         map.addSource("trade", { type: "geojson", data: empty });
         map.addLayer({ id: "trade", type: "line", source: "trade", paint: { "line-color": "#34d399", "line-width": 1, "line-opacity": 0.5, "line-dasharray": [2, 2] } });
 
@@ -662,6 +753,13 @@ export default function WorldMap() {
 
     const apply = () => {
       (map.getSource("zones") as GeoJSONSource | undefined)?.setData(zonePoints(snapshot));
+      // Register a chip image for every distinct building loadout before drawing.
+      for (const t of snapshot.territories) {
+        if (!t.buildings.length) continue;
+        const spec = buildingChipSpec(t.buildings);
+        if (!map.hasImage(spec.sig)) map.addImage(spec.sig, buildingChip(spec.letters, spec.constructing), { pixelRatio: 2 });
+      }
+      (map.getSource("zonebuildings") as GeoJSONSource | undefined)?.setData(buildingPoints(snapshot));
       (map.getSource("trade") as GeoJSONSource | undefined)?.setData(tradeLines(snapshot));
       (map.getSource("armies") as GeoJSONSource | undefined)?.setData(armyPoints(snapshot));
       (map.getSource("fleets") as GeoJSONSource | undefined)?.setData(fleetPoints(snapshot));

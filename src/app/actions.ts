@@ -148,12 +148,27 @@ export async function recruitAtZone(gameId: string, territoryId: string, type: U
 
   const hasBarracks = terr.buildings.some((b) => b.type === "BARRACKS" && b.level >= 1);
   if (!hasBarracks) {
+    const building = terr.buildings.some((b) => b.type === "BARRACKS" && b.completesAt);
     await prisma.gameEvent.create({
-      data: { gameId, scope: "COUNTRY", category: "SYSTEM", title: `${terr.name} needs a Barracks to recruit`, countryIso: p.iso3, severity: 2 },
+      data: {
+        gameId,
+        scope: "COUNTRY",
+        category: "SYSTEM",
+        title: building ? `${terr.name}'s Barracks is still under construction` : `${terr.name} needs a Barracks to recruit`,
+        body: building ? "Wait for the Barracks to finish, then recruit." : undefined,
+        countryIso: p.iso3,
+        severity: 2,
+      },
     });
     return getWorldSnapshot(gameId);
   }
-  await recruitAt(p.id, territoryId, type, count);
+  const ok = await recruitAt(p.id, territoryId, type, count);
+  const label = type.charAt(0) + type.slice(1).toLowerCase();
+  await prisma.gameEvent.create({
+    data: ok
+      ? { gameId, scope: "COUNTRY", category: "CONSTRUCTION", title: `${label} recruited in ${terr.name}`, body: "Added to the zone's garrison.", countryIso: p.iso3, severity: 1 }
+      : { gameId, scope: "COUNTRY", category: "SYSTEM", title: `Could not recruit ${type.toLowerCase()} in ${terr.name}`, body: "Not enough treasury or manpower.", countryIso: p.iso3, severity: 2 },
+  });
   revalidatePath("/");
   return getWorldSnapshot(gameId);
 }
