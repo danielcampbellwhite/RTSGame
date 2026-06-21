@@ -1,7 +1,7 @@
 "use client";
 
 import "maplibre-gl/dist/maplibre-gl.css";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { Map as MlMap, GeoJSONSource, Popup, Marker, MarkerOptions } from "maplibre-gl";
 import { useGameStore } from "@/store/game";
 import type { WorldSnapshot } from "@/lib/snapshot";
@@ -172,6 +172,42 @@ function warIcon() {
   return { width: s, height: s, data: new Uint8Array(ctx.getImageData(0, 0, s, s).data.buffer) };
 }
 
+// Pointy-top hexagon ring around a centre (degrees).
+function hexRing(cx: number, cy: number, r: number): number[][] {
+  const ring: number[][] = [];
+  for (let k = 0; k < 6; k++) {
+    const a = (Math.PI / 180) * (30 + 60 * k);
+    ring.push([cx + r * Math.cos(a), cy + r * Math.sin(a)]);
+  }
+  ring.push(ring[0]);
+  return ring;
+}
+
+// Colour a hex by the current owner of the nearest zone (null = leave uncoloured).
+function nearestZoneColor(
+  cx: number,
+  cy: number,
+  zones: WorldSnapshot["allZones"],
+  playerIso: string,
+  enemy: Set<string>
+): string | null {
+  let best = Infinity;
+  let owner: string | null = null;
+  for (const z of zones) {
+    const dx = z.lng - cx;
+    const dy = z.lat - cy;
+    const d = dx * dx + dy * dy;
+    if (d < best) {
+      best = d;
+      owner = z.ownerIso;
+    }
+  }
+  if (owner === null || best > 25) return null; // >5° from any zone
+  if (owner === playerIso) return "#16a34a"; // green
+  if (enemy.has(owner)) return "#b91c1c"; // red
+  return "#23527a"; // neutral blue
+}
+
 function webglAvailable(): boolean {
   try {
     const c = document.createElement("canvas");
@@ -193,12 +229,38 @@ export default function WorldMap() {
   const toRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const glRef = useRef<{ Marker: new (opts?: MarkerOptions) => Marker } | null>(null);
   const labelsRef = useRef<Marker[]>([]);
+  // Precomputed hex geometry { center, ring } loaded from /hexes.json.
+  const hexBaseRef = useRef<{ c: [number, number]; ring: number[][] }[]>([]);
+  const snapshotRef = useRef<WorldSnapshot | null>(null);
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [msg, setMsg] = useState("");
   const snapshot = useGameStore((s) => s.snapshot);
   const selectedCountryIso = useGameStore((s) => s.selectedCountryIso);
   const selectCountry = useGameStore((s) => s.selectCountry);
   const selectTerritory = useGameStore((s) => s.selectTerritory);
+
+  // Rebuild the hex grid colours from the current snapshot's zone ownership.
+  const refreshHexes = useCallback(() => {
+    const map = mapRef.current;
+    const snap = snapshotRef.current;
+    const base = hexBaseRef.current;
+    if (!map || !snap || !base.length) return;
+    const src = map.getSource("hexgrid") as GeoJSONSource | undefined;
+    if (!src) return;
+    const enemy = new Set(snap.countries.filter((c) => c.atWar).map((c) => c.iso3));
+    const playerIso = snap.player.iso3;
+    const features: GeoJSON.Feature[] = [];
+    for (const h of base) {
+      const color = nearestZoneColor(h.c[0], h.c[1], snap.allZones, playerIso, enemy);
+      if (!color) continue;
+      features.push({
+        type: "Feature",
+        properties: { color },
+        geometry: { type: "Polygon", coordinates: [h.ring] },
+      });
+    }
+    src.setData({ type: "FeatureCollection", features });
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -315,6 +377,31 @@ export default function WorldMap() {
           paint: { "fill-color": "#16a34a", "fill-opacity": 0.9 }, // player = green
           filter: ["==", ["get", "name"], "__none__"],
         });
+        // Tactical hex grid — coloured by the nearest zone's current owner.
+        const emptyFc: GeoJSON.FeatureCollection = { type: "FeatureCollection", features: [] };
+        map.addSource("hexgrid", { type: "geojson", data: emptyFc });
+        map.addLayer({
+          id: "hexgrid-fill",
+          type: "fill",
+          source: "hexgrid",
+          paint: { "fill-color": ["get", "color"], "fill-opacity": 0.55 },
+        });
+        map.addLayer({
+          id: "hexgrid-line",
+          type: "line",
+          source: "hexgrid",
+          paint: { "line-color": "#0a1622", "line-width": 0.3, "line-opacity": 0.5 },
+        });
+
+        // Load hex geometry once, then colour it.
+        fetch("/hexes.json")
+          .then((r) => r.json())
+          .then((data: { r: number; hexes: [number, number][] }) => {
+            hexBaseRef.current = data.hexes.map((c) => ({ c, ring: hexRing(c[0], c[1], data.r) }));
+            refreshHexes();
+          })
+          .catch((e) => console.error("[WorldMap] hexes load failed", e));
+
         // Glow outline for the currently selected country.
         map.addLayer({
           id: "selected-glow",
@@ -434,12 +521,13 @@ export default function WorldMap() {
       mapRef.current?.remove();
       mapRef.current = null;
     };
-  }, [selectCountry, selectTerritory]);
+  }, [selectCountry, selectTerritory, refreshHexes]);
 
   // Push snapshot data into the map sources whenever it changes.
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !snapshot) return;
+    snapshotRef.current = snapshot;
 
     // Map world-atlas country names back to our iso3 (including aliases).
     const m = new Map<string, string>();
@@ -479,10 +567,11 @@ export default function WorldMap() {
             return new gl.Marker({ element: el, anchor: "center" }).setLngLat([c.lng, c.lat]).addTo(map);
           });
       }
+      refreshHexes();
     };
     if (map.isStyleLoaded()) apply();
     else map.once("idle", apply);
-  }, [snapshot]);
+  }, [snapshot, refreshHexes]);
 
   // Glow the selected country.
   useEffect(() => {

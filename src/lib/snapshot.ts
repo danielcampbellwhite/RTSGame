@@ -120,6 +120,8 @@ export interface WorldSnapshot {
   };
   territories: TerritoryView[];
   countries: CountryDot[];
+  // Every zone in the world with its current owner — drives the hex map colours.
+  allZones: { id: string; name: string; lng: number; lat: number; ownerIso: string; kind: string; controlPct: number }[];
   armies: ArmyView[];
   relations: RelationView[];
   wars: WarView[];
@@ -285,6 +287,17 @@ export async function getWorldSnapshot(gameId: string): Promise<WorldSnapshot | 
       atWar: playerEnemyIds.has(c.id),
       combatant: combatantIds.has(c.id),
     })),
+    allZones: countries.flatMap((c) =>
+      c.territories.map((t) => ({
+        id: t.id,
+        name: t.name,
+        lng: t.lng,
+        lat: t.lat,
+        ownerIso: c.iso3,
+        kind: t.kind,
+        controlPct: t.controlPct,
+      }))
+    ),
     armies: armies.map((a) => ({
       id: a.id,
       name: a.name,

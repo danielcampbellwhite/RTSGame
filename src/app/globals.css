@@ -27,6 +27,11 @@ body {
   overscroll-behavior: none;
 }
 
+/* Scale the whole UI up ~150% (rem-based sizing scales together). */
+html {
+  font-size: 150%;
+}
+
 *,
 *::before,
 *::after {
