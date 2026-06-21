@@ -67,6 +67,10 @@ export default function InfoPanel() {
   const territory = snapshot.territories.find((t) => t.id === selectedTerritoryId);
   if (territory) return <TerritoryPanel snapshot={snapshot} territory={territory} />;
 
+  // A selected foreign/neutral zone (not one of ours).
+  const zone = snapshot.allZones.find((z) => z.id === selectedTerritoryId);
+  if (zone) return <ForeignZonePanel snapshot={snapshot} zone={zone} />;
+
   const country = snapshot.countries.find((c) => c.iso3 === selectedCountryIso);
   if (country && !country.isPlayer) return <CountryPanel snapshot={snapshot} iso={country.iso3} name={country.name} />;
 
@@ -494,6 +498,44 @@ function CountryPanel({ snapshot, iso, name }: { snapshot: WorldSnapshot; iso: s
           </Btn>
         )}
       </div>
+    </Shell>
+  );
+}
+
+function ForeignZonePanel({ snapshot, zone }: { snapshot: WorldSnapshot; zone: WorldSnapshot["allZones"][number] }) {
+  const { run, isPending } = useAction();
+  const selectTerritory = useGameStore((s) => s.selectTerritory);
+  const selectCountry = useGameStore((s) => s.selectCountry);
+  const owner = snapshot.countries.find((c) => c.iso3 === zone.ownerIso);
+  const home = snapshot.countries.find((c) => c.iso3 === zone.homeIso);
+  const isEnemy = owner?.atWar;
+
+  return (
+    <Shell title={zone.name} subtitle={zone.kind.replace(/_/g, " ")}>
+      <Bar label="Controlled by" value={owner?.name ?? zone.ownerIso} />
+      {home && home.iso3 !== zone.ownerIso && <Bar label="Homeland" value={home.name} />}
+      <Bar label="Control" value={`${zone.controlPct.toFixed(0)}%`} pct={zone.controlPct} danger={isEnemy} />
+
+      {snapshot.armies.length > 0 && (
+        <Section label={isEnemy ? "Attack" : "Move Army Here"}>
+          {snapshot.armies.map((a) => (
+            <Btn key={a.id} small danger={isEnemy} disabled={isPending} onClick={() => run(() => moveArmy(snapshot.gameId, a.id, zone.id))}>
+              {isEnemy ? "March" : "Move"} {a.name} → {zone.name}
+            </Btn>
+          ))}
+        </Section>
+      )}
+
+      <Btn
+        small
+        disabled={isPending}
+        onClick={() => {
+          selectTerritory(null);
+          selectCountry(zone.ownerIso);
+        }}
+      >
+        Diplomacy with {owner?.name ?? zone.ownerIso} →
+      </Btn>
     </Shell>
   );
 }
