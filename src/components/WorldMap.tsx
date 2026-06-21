@@ -147,7 +147,18 @@ export default function WorldMap() {
         renderWorldCopies: false,
         // Smoother edges; reduces stray line artifacts on some mobile GPUs.
         canvasContextAttributes: { antialias: true },
+        // Lock orientation: flat, north-up, no rotation or tilt.
+        dragRotate: false,
+        pitchWithRotate: false,
+        rollEnabled: false,
+        touchPitch: false,
+        bearing: 0,
+        pitch: 0,
       });
+      // Belt-and-suspenders: kill any remaining rotation gestures.
+      map.dragRotate.disable();
+      map.touchZoomRotate.disableRotation();
+      map.keyboard.disableRotation?.();
       mapRef.current = map;
       map.on("error", (e) => {
         const text = (e?.error as Error)?.message ?? String(e);
