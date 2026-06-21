@@ -1,26 +1,28 @@
 import { prisma } from "@/lib/db";
 import { TECH_BY_KEY } from "@/data/tech";
 
+export type ResearchStart = "ok" | "exists" | "prereq" | "fail";
+
 /** Begin a research project if prerequisites are met and it isn't already taken. */
-export async function startResearchProject(countryId: string, techKey: string): Promise<boolean> {
+export async function startResearchProject(countryId: string, techKey: string): Promise<ResearchStart> {
   const node = TECH_BY_KEY[techKey];
-  if (!node) return false;
+  if (!node) return "fail";
 
   const existing = await prisma.researchProject.findUnique({
     where: { countryId_techKey: { countryId, techKey } },
   });
-  if (existing) return false;
+  if (existing) return "exists";
 
   // Prerequisites must be completed.
   if (node.requires?.length) {
     const done = await prisma.researchProject.findMany({
       where: { countryId, techKey: { in: node.requires }, completed: true },
     });
-    if (done.length < node.requires.length) return false;
+    if (done.length < node.requires.length) return "prereq";
   }
 
   const country = await prisma.country.findUnique({ where: { id: countryId } });
-  if (!country) return false;
+  if (!country) return "fail";
 
   // Higher research budget => faster completion.
   const budgetFactor = 50 / Math.max(5, country.researchBudgetPct);
@@ -34,5 +36,5 @@ export async function startResearchProject(countryId: string, techKey: string): 
       completesAt: new Date(Date.now() + ms),
     },
   });
-  return true;
+  return "ok";
 }

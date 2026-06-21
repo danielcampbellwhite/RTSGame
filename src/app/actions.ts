@@ -9,6 +9,7 @@ import { buildingCost, buildingDurationMs } from "@/lib/buildings";
 import { UNIT_STATS, maxRange, forceStrength } from "@/lib/units";
 import { recruit, orderMove, recruitAt, recruitNaval, sailFleet, amphibiousAssault } from "@/lib/sim/forces";
 import { startResearchProject } from "@/lib/sim/research";
+import { TECH_BY_KEY } from "@/data/tech";
 import { declareWar as declareWarCore, endWar, adjustOpinion, setFlags } from "@/lib/sim/diplomacy";
 import type { BuildingType, UnitType, TradeGood } from "@prisma/client";
 import { revalidatePath } from "next/cache";
@@ -69,7 +70,20 @@ export async function queueBuilding(gameId: string, territoryId: string, type: B
 
   const existing = territory.buildings.find((b) => b.type === type);
   // Block stacking another upgrade while one is already in progress.
-  if (existing?.completesAt) return getWorldSnapshot(gameId);
+  if (existing?.completesAt) {
+    await prisma.gameEvent.create({
+      data: {
+        gameId,
+        scope: "COUNTRY",
+        category: "CONSTRUCTION",
+        title: `${prettyType(type)} in ${territory.name} is already under construction`,
+        body: "Only one upgrade per building runs at a time.",
+        countryIso: territory.country.iso3,
+        severity: 1,
+      },
+    });
+    return getWorldSnapshot(gameId);
+  }
 
   const targetLevel = (existing?.level ?? 0) + 1;
   const cost = buildingCost(type, targetLevel);
@@ -105,6 +119,17 @@ export async function queueBuilding(gameId: string, territoryId: string, type: B
       data: { territoryId, type, level: 0, buildingToLevel: 1, completesAt },
     });
   }
+  await prisma.gameEvent.create({
+    data: {
+      gameId,
+      scope: "COUNTRY",
+      category: "CONSTRUCTION",
+      title: `${existing ? "Upgrading" : "Building"} ${prettyType(type)} in ${territory.name} → Lv${targetLevel}`,
+      body: `Ready in ${etaText(completesAt)}.`,
+      countryIso: c.iso3,
+      severity: 1,
+    },
+  });
   revalidatePath("/");
   return getWorldSnapshot(gameId);
 }
@@ -180,7 +205,12 @@ export async function strikeZone(gameId: string, armyId: string, targetZoneId: s
   if (!p) return getWorldSnapshot(gameId);
   const army = await prisma.army.findFirst({ where: { id: armyId, countryId: p.id }, include: { units: true } });
   if (!army || !army.locationTerritoryId) return getWorldSnapshot(gameId);
-  if (army.strikeReadyAt && army.strikeReadyAt.getTime() > Date.now()) return getWorldSnapshot(gameId);
+  if (army.strikeReadyAt && army.strikeReadyAt.getTime() > Date.now()) {
+    await prisma.gameEvent.create({
+      data: { gameId, scope: "COUNTRY", category: "SYSTEM", title: `${army.name} is still reloading`, body: `Ready to strike again in ${etaText(army.strikeReadyAt)}.`, countryIso: p.iso3, severity: 1 },
+    });
+    return getWorldSnapshot(gameId);
+  }
 
   const [loc, target] = await Promise.all([
     prisma.territory.findUnique({ where: { id: army.locationTerritoryId } }),
@@ -257,7 +287,21 @@ export async function sailFleetToZone(gameId: string, fleetId: string, zoneId: s
   const p = await player(gameId);
   const fleet = await prisma.fleet.findUnique({ where: { id: fleetId } });
   const zone = await prisma.territory.findUnique({ where: { id: zoneId } });
-  if (p && fleet && fleet.countryId === p.id && zone) await sailFleet(fleetId, zone.lng, zone.lat);
+  if (p && fleet && fleet.countryId === p.id && zone) {
+    await sailFleet(fleetId, zone.lng, zone.lat);
+    const after = await prisma.fleet.findUnique({ where: { id: fleetId } });
+    await prisma.gameEvent.create({
+      data: {
+        gameId,
+        scope: "COUNTRY",
+        category: "SYSTEM",
+        title: `Fleet sailing to ${zone.name}`,
+        body: after?.arrivesAt ? `Arrives in ${etaText(after.arrivesAt)}.` : undefined,
+        countryIso: p.iso3,
+        severity: 1,
+      },
+    });
+  }
   revalidatePath("/");
   return getWorldSnapshot(gameId);
 }
@@ -268,7 +312,12 @@ export async function fleetStrike(gameId: string, fleetId: string, zoneId: strin
   if (!p) return getWorldSnapshot(gameId);
   const fleet = await prisma.fleet.findFirst({ where: { id: fleetId, countryId: p.id }, include: { units: true } });
   if (!fleet) return getWorldSnapshot(gameId);
-  if (fleet.strikeReadyAt && fleet.strikeReadyAt.getTime() > Date.now()) return getWorldSnapshot(gameId);
+  if (fleet.strikeReadyAt && fleet.strikeReadyAt.getTime() > Date.now()) {
+    await prisma.gameEvent.create({
+      data: { gameId, scope: "COUNTRY", category: "SYSTEM", title: `Fleet guns are reloading`, body: `Ready to bombard again in ${etaText(fleet.strikeReadyAt)}.`, countryIso: p.iso3, severity: 1 },
+    });
+    return getWorldSnapshot(gameId);
+  }
   const target = await prisma.territory.findUnique({ where: { id: zoneId } });
   if (!target || target.countryId === p.id) return getWorldSnapshot(gameId);
   const range = maxRange(fleet.units);
@@ -290,10 +339,24 @@ export async function moveArmy(gameId: string, armyId: string, territoryId: stri
   const army = await prisma.army.findUnique({ where: { id: armyId } });
   if (p && army && army.countryId === p.id) {
     const ok = await orderMove(armyId, territoryId);
+    const t = await prisma.territory.findUnique({ where: { id: territoryId } });
     if (!ok) {
-      const t = await prisma.territory.findUnique({ where: { id: territoryId } });
       await prisma.gameEvent.create({
         data: { gameId, scope: "COUNTRY", category: "SYSTEM", title: `${t?.name ?? "Target"} can't be reached by land — use an amphibious assault`, countryIso: p.iso3, severity: 2 },
+      });
+    } else {
+      const after = await prisma.army.findUnique({ where: { id: armyId } });
+      const enemy = t && t.countryId !== p.id;
+      await prisma.gameEvent.create({
+        data: {
+          gameId,
+          scope: "COUNTRY",
+          category: enemy ? "BATTLE" : "SYSTEM",
+          title: `${army.name} ${enemy ? "advancing on" : "marching to"} ${t?.name ?? "target"}`,
+          body: after?.arrivesAt ? `Arrives in ${etaText(after.arrivesAt)}.` : undefined,
+          countryIso: p.iso3,
+          severity: enemy ? 2 : 1,
+        },
       });
     }
   }
@@ -307,14 +370,28 @@ export async function amphibiousAssaultAction(gameId: string, armyId: string, te
   const p = await player(gameId);
   if (!p) return getWorldSnapshot(gameId);
   const res = await amphibiousAssault(p.id, armyId, territoryId);
+  const t = await prisma.territory.findUnique({ where: { id: territoryId } });
   if (res !== "ok") {
-    const t = await prisma.territory.findUnique({ where: { id: territoryId } });
     await prisma.gameEvent.create({
       data: {
         gameId,
         scope: "COUNTRY",
         category: "SYSTEM",
         title: res === "no-fleet" ? `Bring a fleet near your army to assault ${t?.name ?? "the target"}` : `Amphibious assault failed`,
+        body: res === "no-fleet" ? "A fleet must be within range of the embarking army to escort it." : undefined,
+        countryIso: p.iso3,
+        severity: 2,
+      },
+    });
+  } else {
+    const after = await prisma.army.findUnique({ where: { id: armyId } });
+    await prisma.gameEvent.create({
+      data: {
+        gameId,
+        scope: "COUNTRY",
+        category: "BATTLE",
+        title: `Amphibious assault launched on ${t?.name ?? "target"}`,
+        body: after?.arrivesAt ? `Lands in ${etaText(after.arrivesAt)}.` : undefined,
         countryIso: p.iso3,
         severity: 2,
       },
@@ -343,10 +420,33 @@ export async function proposePeace(gameId: string, warId: string) {
 export async function improveRelations(gameId: string, targetIso: string) {
   await catchUp(gameId);
   const [p, target] = await Promise.all([player(gameId), countryByIso(gameId, targetIso)]);
-  if (p && target && p.influence >= DIPLOMACY.influenceCostImprove) {
-    await prisma.country.update({ where: { id: p.id }, data: { influence: p.influence - DIPLOMACY.influenceCostImprove } });
-    await adjustOpinion(p.id, target.id, DIPLOMACY.improveStep);
+  if (!p || !target) return getWorldSnapshot(gameId);
+  if (p.influence < DIPLOMACY.influenceCostImprove) {
+    await prisma.gameEvent.create({
+      data: {
+        gameId,
+        scope: "COUNTRY",
+        category: "DIPLOMACY",
+        title: `Not enough influence to improve relations with ${target.name}`,
+        body: `Needs ${DIPLOMACY.influenceCostImprove} influence (you have ${p.influence.toFixed(0)}).`,
+        countryIso: p.iso3,
+        severity: 2,
+      },
+    });
+    return getWorldSnapshot(gameId);
   }
+  await prisma.country.update({ where: { id: p.id }, data: { influence: p.influence - DIPLOMACY.influenceCostImprove } });
+  await adjustOpinion(p.id, target.id, DIPLOMACY.improveStep);
+  await prisma.gameEvent.create({
+    data: {
+      gameId,
+      scope: "COUNTRY",
+      category: "DIPLOMACY",
+      title: `Relations with ${target.name} improved (+${DIPLOMACY.improveStep})`,
+      countryIso: p.iso3,
+      severity: 1,
+    },
+  });
   revalidatePath("/");
   return getWorldSnapshot(gameId);
 }
@@ -354,7 +454,18 @@ export async function improveRelations(gameId: string, targetIso: string) {
 export async function toggleEmbargo(gameId: string, targetIso: string, embargo: boolean) {
   await catchUp(gameId);
   const [p, target] = await Promise.all([player(gameId), countryByIso(gameId, targetIso)]);
-  if (p && target) await setFlags(p.id, target.id, { embargo });
+  if (!p || !target) return getWorldSnapshot(gameId);
+  await setFlags(p.id, target.id, { embargo });
+  await prisma.gameEvent.create({
+    data: {
+      gameId,
+      scope: "COUNTRY",
+      category: "DIPLOMACY",
+      title: embargo ? `Embargo imposed on ${target.name}` : `Embargo on ${target.name} lifted`,
+      countryIso: p.iso3,
+      severity: 1,
+    },
+  });
   revalidatePath("/");
   return getWorldSnapshot(gameId);
 }
@@ -373,6 +484,17 @@ export async function createTradeRoute(
     const fromId = direction === "EXPORT" ? p.id : other.id;
     const toId = direction === "EXPORT" ? other.id : p.id;
     await prisma.tradeRoute.create({ data: { fromId, toId, good, ratePerDay: Math.max(0, ratePerDay) } });
+    await prisma.gameEvent.create({
+      data: {
+        gameId,
+        scope: "COUNTRY",
+        category: "TRADE",
+        title: `${direction === "EXPORT" ? "Exporting" : "Importing"} ${good.toLowerCase()} ${direction === "EXPORT" ? "to" : "from"} ${other.name}`,
+        body: `${Math.max(0, ratePerDay)} / day.`,
+        countryIso: p.iso3,
+        severity: 1,
+      },
+    });
   }
   revalidatePath("/");
   return getWorldSnapshot(gameId);
@@ -389,11 +511,43 @@ export async function cancelTradeRoute(gameId: string, routeId: string) {
 export async function startResearch(gameId: string, techKey: string) {
   await catchUp(gameId);
   const p = await player(gameId);
-  if (p) await startResearchProject(p.id, techKey);
+  if (!p) return getWorldSnapshot(gameId);
+  const node = TECH_BY_KEY[techKey];
+  const name = node?.name ?? techKey;
+  const res = await startResearchProject(p.id, techKey);
+  const msg: Record<typeof res, { title: string; body?: string; sev: number }> = {
+    ok: { title: `Research started: ${name}`, body: "Track it under the Research tab.", sev: 1 },
+    exists: { title: `${name} is already researched or in progress`, sev: 1 },
+    prereq: { title: `${name} needs an earlier technology first`, body: "Complete its prerequisite, then try again.", sev: 2 },
+    fail: { title: `Could not start research on ${name}`, sev: 2 },
+  };
+  const m = msg[res];
+  await prisma.gameEvent.create({
+    data: { gameId, scope: "COUNTRY", category: "RESEARCH", title: m.title, body: m.body, countryIso: p.iso3, severity: m.sev },
+  });
   revalidatePath("/");
   return getWorldSnapshot(gameId);
 }
 
 function clampPct(v: number): number {
   return Math.max(0, Math.min(100, v));
+}
+
+/** "POWER_PLANT" → "Power Plant" for player-facing copy. */
+function prettyType(type: string): string {
+  return type
+    .toLowerCase()
+    .split("_")
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(" ");
+}
+
+/** Short human countdown ("3h", "45m") for a future timestamp. */
+function etaText(at: Date): string {
+  const ms = at.getTime() - Date.now();
+  if (ms <= 0) return "moments";
+  const h = ms / 3_600_000;
+  if (h >= 24) return `${(h / 24).toFixed(1)}d`;
+  if (h >= 1) return `${h.toFixed(0)}h`;
+  return `${Math.max(1, Math.round(ms / 60_000))}m`;
 }

@@ -84,7 +84,7 @@ async function aiEconomy(countryId: string, rng: Rng) {
   // Prefer starting economy/energy research; otherwise queue a factory.
   const candidates = TECH_TREE.filter((t) => t.category === "ECONOMY" || t.category === "ENERGY");
   const node = candidates[Math.floor(rng() * candidates.length)];
-  if (await startResearchProject(countryId, node.key)) return;
+  if ((await startResearchProject(countryId, node.key)) === "ok") return;
 
   const terr = await prisma.territory.findFirst({ where: { countryId }, orderBy: { population: "desc" } });
   if (!terr) return;

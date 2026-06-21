@@ -414,11 +414,21 @@ export async function getWorldSnapshot(gameId: string): Promise<WorldSnapshot | 
     })),
     research: research.map((r) => {
       const node = TECH_TREE.find((t) => t.key === r.techKey);
+      // Derive progress from the actual completion clock so the bar reflects the
+      // real time-to-done (which scales with the tech's length and budget),
+      // rather than a flat fill rate that finished long before the tech did.
+      let progress = r.completed ? 100 : r.progress;
+      if (!r.completed && node && r.completesAt) {
+        const budgetFactor = 50 / Math.max(5, player.researchBudgetPct);
+        const total = node.days * 86_400_000 * budgetFactor;
+        const remaining = r.completesAt.getTime() - Date.now();
+        progress = Math.max(0, Math.min(100, ((total - remaining) / total) * 100));
+      }
       return {
         techKey: r.techKey,
         name: node?.name ?? r.techKey,
         category: r.category,
-        progress: r.progress,
+        progress,
         completed: r.completed,
         effect: node ? describeEffect(node.effect) : "",
       };
