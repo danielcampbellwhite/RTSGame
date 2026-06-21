@@ -230,7 +230,9 @@ function StartScreen({ onStart, onResume }: { onStart: (iso: string) => void; on
   const [query, setQuery] = useState("");
   const [code, setCode] = useState("");
   const [resumeError, setResumeError] = useState(false);
-  const list = COUNTRIES.filter((c) => c.name.toLowerCase().includes(query.toLowerCase()));
+  const list = COUNTRIES.filter((c) => c.name.toLowerCase().includes(query.toLowerCase())).sort((a, b) =>
+    a.name.localeCompare(b.name)
+  );
 
   const tryResume = async () => {
     setResumeError(false);

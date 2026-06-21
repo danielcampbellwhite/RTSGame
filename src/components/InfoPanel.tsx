@@ -218,7 +218,7 @@ function DiplomacyTab({ snapshot }: { snapshot: WorldSnapshot }) {
   const relByIso = new Map(snapshot.relations.map((r) => [r.iso3, r]));
   const others = snapshot.countries
     .filter((c) => !c.isPlayer && c.isAlive)
-    .sort((a, b) => (relByIso.get(b.iso3)?.opinion ?? 0) - (relByIso.get(a.iso3)?.opinion ?? 0));
+    .sort((a, b) => a.name.localeCompare(b.name));
 
   return (
     <div className="space-y-2">
@@ -278,7 +278,7 @@ const GOODS: TradeGood[] = ["OIL", "FOOD", "STEEL", "RARE_MATERIALS"];
 
 function TradeTab({ snapshot }: { snapshot: WorldSnapshot }) {
   const { run, isPending } = useAction();
-  const others = snapshot.countries.filter((c) => !c.isPlayer && c.isAlive);
+  const others = snapshot.countries.filter((c) => !c.isPlayer && c.isAlive).sort((a, b) => a.name.localeCompare(b.name));
   const [iso, setIso] = useState(others[0]?.iso3 ?? "");
   const [good, setGood] = useState<TradeGood>("OIL");
   const [rate, setRate] = useState(10);
