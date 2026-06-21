@@ -34,11 +34,15 @@ export default function Page() {
   // Drive the shell height from JS (innerHeight in px) so it never depends on
   // dvh units or the `inset` shorthand, which some browsers don't support.
   const [vh, setVh] = useState<number | null>(null);
+  const [vw, setVw] = useState<number | null>(null);
   useEffect(() => {
     // visualViewport reflects the truly visible area (excludes the browser's
-    // URL/toolbar), so the bottom tab bar is never pushed off-screen.
+    // URL/toolbar), so the app is pinned exactly to the device frame.
     const vv = typeof window !== "undefined" ? window.visualViewport : null;
-    const update = () => setVh(Math.round(vv?.height ?? window.innerHeight));
+    const update = () => {
+      setVh(Math.round(vv?.height ?? window.innerHeight));
+      setVw(Math.round(vv?.width ?? window.innerWidth));
+    };
     update();
     window.addEventListener("resize", update);
     window.addEventListener("orientationchange", update);
@@ -168,17 +172,23 @@ export default function Page() {
   // on md+ they revert to their normal grid cells.
   const sheet = (active: boolean) =>
     `min-h-0 ${
-      active ? "fixed inset-x-2 bottom-16 top-16 z-30" : "hidden"
-    } md:static md:inset-auto md:bottom-auto md:top-auto md:z-auto md:block`;
+      active ? "fixed left-2 right-2 bottom-16 top-16 z-30" : "hidden"
+    } md:static md:left-auto md:right-auto md:bottom-auto md:top-auto md:z-auto md:block`;
 
   return (
     <div
       style={{
-        height: vh ? `${vh}px` : "100vh",
+        position: "fixed",
+        top: 0,
+        left: 0,
+        width: vw ? `${vw}px` : "100%",
+        height: vh ? `${vh}px` : "100%",
         paddingTop: "calc(0.5rem + env(safe-area-inset-top))",
         paddingBottom: "calc(0.5rem + env(safe-area-inset-bottom))",
+        paddingLeft: "0.5rem",
+        paddingRight: "0.5rem",
       }}
-      className="grid w-full max-w-full grid-rows-[auto_1fr_auto] gap-2 overflow-hidden px-2"
+      className="grid grid-rows-[auto_1fr_auto] gap-2 overflow-hidden"
     >
       {showOnboarding && <Onboarding onClose={closeOnboarding} />}
 
@@ -249,7 +259,7 @@ function StartScreen({ onStart, onResume }: { onStart: (iso: string) => void; on
     if (!ok) setResumeError(true);
   };
   return (
-    <div className="fixed inset-0 flex flex-col items-center justify-center gap-4 overflow-y-auto p-4 sm:p-6">
+    <div className="fixed left-0 top-0 flex h-full w-full flex-col items-center justify-center gap-4 overflow-y-auto p-4 sm:p-6">
       <h1 className="neon-text text-center text-2xl font-bold tracking-widest text-[var(--wd-magenta)] sm:text-3xl">
         WORLD DOMINION
       </h1>
@@ -300,7 +310,7 @@ function StartScreen({ onStart, onResume }: { onStart: (iso: string) => void; on
 
 function Center({ children }: { children: React.ReactNode }) {
   return (
-    <div className="fixed inset-0 flex items-center justify-center px-4 text-center text-sm text-cyan-200/60">
+    <div className="fixed left-0 top-0 flex h-full w-full items-center justify-center px-4 text-center text-sm text-cyan-200/60">
       <span className="pulse">{children}</span>
     </div>
   );

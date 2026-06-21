@@ -8,7 +8,7 @@ export default function Onboarding({ onClose }: { onClose: () => void }) {
   const r = snapshot.rankings;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+    <div className="fixed left-0 top-0 z-50 flex h-full w-full items-center justify-center bg-black/70 p-4">
       <div className="panel glow-border max-h-[85vh] w-full max-w-md overflow-y-auto scroll-thin p-5">
         <h2 className="neon-text mb-1 text-lg font-bold text-[var(--wd-magenta)]">
           You command {snapshot.player.name}
