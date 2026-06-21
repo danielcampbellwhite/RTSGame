@@ -210,12 +210,29 @@ export async function recruitNavalAtZone(gameId: string, zoneId: string, type: U
   if (!terr || terr.countryId !== p.id) return getWorldSnapshot(gameId);
   const port = terr.buildings.some((b) => (b.type === "NAVAL_BASE" || b.type === "PORT") && b.level >= 1);
   if (!port) {
+    const building = terr.buildings.some((b) => (b.type === "NAVAL_BASE" || b.type === "PORT") && b.completesAt);
     await prisma.gameEvent.create({
-      data: { gameId, scope: "COUNTRY", category: "SYSTEM", title: `${terr.name} needs a Naval Base or Port to build ships`, countryIso: p.iso3, severity: 2 },
+      data: {
+        gameId,
+        scope: "COUNTRY",
+        category: "SYSTEM",
+        title: building
+          ? `${terr.name}'s shipyard is still under construction`
+          : `${terr.name} needs a Naval Base or Port to build ships`,
+        body: building ? "Wait for the Naval Base to finish, then build ships." : undefined,
+        countryIso: p.iso3,
+        severity: 2,
+      },
     });
     return getWorldSnapshot(gameId);
   }
-  await recruitNaval(p.id, zoneId, type, count);
+  const ok = await recruitNaval(p.id, zoneId, type, count);
+  const label = type.charAt(0) + type.slice(1).toLowerCase();
+  await prisma.gameEvent.create({
+    data: ok
+      ? { gameId, scope: "COUNTRY", category: "CONSTRUCTION", title: `${label} commissioned at ${terr.name}`, body: "Joins your national fleet — see the Military tab or the ship icon on the map.", countryIso: p.iso3, severity: 1 }
+      : { gameId, scope: "COUNTRY", category: "SYSTEM", title: `Could not build a ${type.toLowerCase()} at ${terr.name}`, body: "Not enough treasury or manpower.", countryIso: p.iso3, severity: 2 },
+  });
   revalidatePath("/");
   return getWorldSnapshot(gameId);
 }

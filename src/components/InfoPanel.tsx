@@ -518,22 +518,39 @@ function TerritoryPanel({ snapshot, territory }: { snapshot: WorldSnapshot; terr
         <div className="text-[10px] text-cyan-200/60">Build a Barracks here to recruit a garrison.</div>
       )}
 
-      {(byType.has("NAVAL_BASE") || byType.has("PORT")) && (
-        <Section label="Build Ships">
-          <div className="grid grid-cols-2 gap-1">
-            {NAVAL_UNITS.map((u) => {
-              const stat = UNIT_STATS[u.type];
-              const afford = money >= stat.moneyCost && snapshot.player.resources.manpower >= stat.manpowerCost;
-              return (
-                <Btn key={u.type} small disabled={isPending || !afford} onClick={() => run(() => recruitNavalAtZone(snapshot.gameId, territory.id, u.type, 1))}>
-                  ⚓ {u.label}
-                  <span className="ml-1 text-[9px] text-cyan-200/70">{stat.moneyCost}₵</span>
-                </Btn>
-              );
-            })}
-          </div>
-        </Section>
-      )}
+      {(() => {
+        const yard = byType.get("NAVAL_BASE") ?? byType.get("PORT");
+        if (!yard) return null;
+        const ready = yard.level >= 1;
+        const shipCount = snapshot.fleets.reduce((n, f) => n + f.units.reduce((m, u) => m + u.count, 0), 0);
+        return (
+          <Section label="Build Ships">
+            {!ready ? (
+              <div className="text-[10px] text-[var(--wd-amber)]">
+                Shipyard under construction{yard.completesAt ? ` · ${eta(yard.completesAt)}` : ""}. Finish it to build ships.
+              </div>
+            ) : (
+              <>
+                <div className="grid grid-cols-2 gap-1">
+                  {NAVAL_UNITS.map((u) => {
+                    const stat = UNIT_STATS[u.type];
+                    const afford = money >= stat.moneyCost && snapshot.player.resources.manpower >= stat.manpowerCost;
+                    return (
+                      <Btn key={u.type} small disabled={isPending || !afford} onClick={() => run(() => recruitNavalAtZone(snapshot.gameId, territory.id, u.type, 1))}>
+                        ⚓ {u.label}
+                        <span className="ml-1 text-[9px] text-cyan-200/70">{stat.moneyCost}₵</span>
+                      </Btn>
+                    );
+                  })}
+                </div>
+                <div className="mt-1 text-[10px] text-cyan-200/70">
+                  Ships are built instantly and join your national fleet{shipCount > 0 ? ` (${shipCount} afloat)` : ""}. Find it on the Military tab or as a ship icon on the map.
+                </div>
+              </>
+            )}
+          </Section>
+        );
+      })()}
 
       {(() => {
         const garrison = snapshot.armies.filter((a) => a.locationTerritoryId === territory.id);
