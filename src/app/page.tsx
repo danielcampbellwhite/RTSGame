@@ -23,7 +23,6 @@ export default function Page() {
   const setSnapshot = useGameStore((s) => s.setSnapshot);
   const snapshot = useGameStore((s) => s.snapshot);
   const selectedTerritoryId = useGameStore((s) => s.selectedTerritoryId);
-  const selectedCountryIso = useGameStore((s) => s.selectedCountryIso);
   const [gameId, setGameId] = useState<string | null>(null);
   const [booting, setBooting] = useState(true);
   const [mobileTab, setMobileTab] = useState<"map" | "info" | "feed">("map");
@@ -72,10 +71,11 @@ export default function Page() {
       return v;
     });
 
-  // Tapping something on the map should reveal the control sheet on mobile.
+  // Opening a zone's management (second tap → selectedTerritoryId) or a country
+  // reveals the control sheet on mobile. A first-tap highlight does not.
   useEffect(() => {
-    if (selectedTerritoryId || selectedCountryIso) setMobileTab("info");
-  }, [selectedTerritoryId, selectedCountryIso]);
+    if (selectedTerritoryId) setMobileTab("info");
+  }, [selectedTerritoryId]);
 
   // Show the intro once per browser the first time a world is loaded.
   useEffect(() => {

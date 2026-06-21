@@ -3,17 +3,17 @@
 import "maplibre-gl/dist/maplibre-gl.css";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Map as MlMap, GeoJSONSource, Popup, Marker, MarkerOptions } from "maplibre-gl";
+import { Delaunay } from "d3-delaunay";
+import polygonClipping, { type Polygon as PcPolygon, type MultiPolygon as PcMultiPolygon } from "polygon-clipping";
 import { useGameStore } from "@/store/game";
 import type { WorldSnapshot } from "@/lib/snapshot";
 
-// Self-contained dark style — no external tiles or API key required.
 const DARK_STYLE = {
   version: 8 as const,
   sources: {},
   layers: [{ id: "bg", type: "background" as const, paint: { "background-color": "#04060a" } }],
 };
 
-// Our dataset names vs world-atlas country names, where they differ.
 const NAME_ALIAS: Record<string, string> = {
   "United States": "United States of America",
   Czechia: "Czech Republic",
@@ -138,7 +138,6 @@ function warIcon() {
   return { width: s, height: s, data: new Uint8Array(ctx.getImageData(0, 0, s, s).data.buffer) };
 }
 
-// Per-zone-type icon (distinct shape, so a country reads as labelled blocks).
 function zoneIcon(kind: string) {
   const s = 30;
   const cv = document.createElement("canvas");
@@ -191,16 +190,6 @@ function zoneIcon(kind: string) {
   return { width: s, height: s, data: new Uint8Array(ctx.getImageData(0, 0, s, s).data.buffer) };
 }
 
-function hexRing(cx: number, cy: number, r: number): number[][] {
-  const ring: number[][] = [];
-  for (let k = 0; k < 6; k++) {
-    const a = (Math.PI / 180) * (30 + 60 * k);
-    ring.push([cx + r * Math.cos(a), cy + r * Math.sin(a)]);
-  }
-  ring.push(ring[0]);
-  return ring;
-}
-
 function webglAvailable(): boolean {
   try {
     const c = document.createElement("canvas");
@@ -210,7 +199,79 @@ function webglAvailable(): boolean {
   }
 }
 
-type HexBase = { c: [number, number]; ring: number[][]; name: string; zoneId: string | null };
+// Build a polygon-clipping MultiPolygon for a country from its GeoJSON features.
+function countryMultiPolygon(features: GeoJSON.Feature[]): PcMultiPolygon {
+  const mp: PcMultiPolygon = [];
+  for (const f of features) {
+    const g = f.geometry;
+    if (g.type === "Polygon") mp.push(g.coordinates as PcPolygon);
+    else if (g.type === "MultiPolygon") for (const poly of g.coordinates) mp.push(poly as PcPolygon);
+  }
+  return mp;
+}
+
+// Partition each country's area among its zone points (Voronoi, clipped to the
+// border). Returns one MultiPolygon feature per zone tagged with its id.
+function computeRegions(
+  worldFeatures: GeoJSON.Feature[],
+  snap: WorldSnapshot,
+  nameToIso: Map<string, string>
+): GeoJSON.Feature[] {
+  const byIso = new Map<string, GeoJSON.Feature[]>();
+  for (const f of worldFeatures) {
+    const iso = nameToIso.get((f.properties?.name as string) ?? "");
+    if (!iso) continue;
+    (byIso.get(iso) ?? byIso.set(iso, []).get(iso)!).push(f);
+  }
+  const zonesByHome = new Map<string, WorldSnapshot["allZones"]>();
+  for (const z of snap.allZones) (zonesByHome.get(z.homeIso) ?? zonesByHome.set(z.homeIso, []).get(z.homeIso)!).push(z);
+
+  const out: GeoJSON.Feature[] = [];
+  for (const [iso, features] of byIso) {
+    const zones = zonesByHome.get(iso);
+    if (!zones?.length) continue;
+    const mp = countryMultiPolygon(features);
+    if (!mp.length) continue;
+
+    if (zones.length === 1) {
+      out.push({ type: "Feature", properties: { zoneId: zones[0].id }, geometry: { type: "MultiPolygon", coordinates: mp as unknown as GeoJSON.Position[][][] } });
+      continue;
+    }
+
+    let minX = 180, minY = 90, maxX = -180, maxY = -90;
+    for (const poly of mp) for (const ring of poly) for (const [x, y] of ring) {
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+      if (y < minY) minY = y;
+      if (y > maxY) maxY = y;
+    }
+    const pts = zones.map((z) => [z.lng, z.lat] as [number, number]);
+    const vor = Delaunay.from(pts).voronoi([minX - 1, minY - 1, maxX + 1, maxY + 1]);
+    for (let i = 0; i < zones.length; i++) {
+      const cell = vor.cellPolygon(i);
+      if (!cell) continue;
+      try {
+        const clipped = polygonClipping.intersection([cell as unknown as PcPolygon[0]], mp);
+        if (!clipped.length) continue;
+        out.push({
+          type: "Feature",
+          properties: { zoneId: zones[i].id },
+          geometry: { type: "MultiPolygon", coordinates: clipped as unknown as GeoJSON.Position[][][] },
+        });
+      } catch {
+        /* skip degenerate cell */
+      }
+    }
+  }
+  return out;
+}
+
+function zoneColor(ownerIso: string | undefined, playerIso: string, enemy: Set<string>): string {
+  if (!ownerIso) return "#1b3a55";
+  if (ownerIso === playerIso) return "#16a34a";
+  if (enemy.has(ownerIso)) return "#b91c1c";
+  return "#2a5f86";
+}
 
 export default function WorldMap() {
   const ref = useRef<HTMLDivElement>(null);
@@ -221,70 +282,36 @@ export default function WorldMap() {
   const toRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const glRef = useRef<{ Marker: new (opts?: MarkerOptions) => Marker } | null>(null);
   const labelsRef = useRef<Marker[]>([]);
-  const hexBaseRef = useRef<HexBase[]>([]);
-  const assignedGameRef = useRef<string | null>(null);
+  const worldFeaturesRef = useRef<GeoJSON.Feature[]>([]);
+  const regionsRef = useRef<GeoJSON.Feature[]>([]);
+  const regionsGameRef = useRef<string | null>(null);
   const snapshotRef = useRef<WorldSnapshot | null>(null);
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [msg, setMsg] = useState("");
   const snapshot = useGameStore((s) => s.snapshot);
-  const selectedCountryIso = useGameStore((s) => s.selectedCountryIso);
   const selectedTerritoryId = useGameStore((s) => s.selectedTerritoryId);
-  const selectCountry = useGameStore((s) => s.selectCountry);
-  const selectTerritory = useGameStore((s) => s.selectTerritory);
+  const highlightedZoneId = useGameStore((s) => s.highlightedZoneId);
 
-  // Assign each hex to its country's nearest zone (a "block"), then colour the
-  // grid by each zone's current owner so captures redraw the front line.
-  const refreshHexes = useCallback(() => {
+  // Compute (once per game) the zone regions, then colour them by current owner.
+  const refreshZones = useCallback(() => {
     const map = mapRef.current;
     const snap = snapshotRef.current;
-    const base = hexBaseRef.current;
-    if (!map || !snap || !base.length) return;
-    const src = map.getSource("hexgrid") as GeoJSONSource | undefined;
+    if (!map || !snap || !worldFeaturesRef.current.length) return;
+    const src = map.getSource("zoneregions") as GeoJSONSource | undefined;
     if (!src) return;
 
-    if (assignedGameRef.current !== snap.gameId) {
-      const byHome = new Map<string, WorldSnapshot["allZones"]>();
-      for (const z of snap.allZones) {
-        const arr = byHome.get(z.homeIso) ?? [];
-        arr.push(z);
-        byHome.set(z.homeIso, arr);
-      }
-      for (const h of base) {
-        const iso = nameToIso.current.get(h.name);
-        const zs = iso ? byHome.get(iso) : undefined;
-        if (!zs || !zs.length) {
-          h.zoneId = null;
-          continue;
-        }
-        let bd = Infinity;
-        let bz: string | null = null;
-        for (const z of zs) {
-          const dx = z.lng - h.c[0];
-          const dy = z.lat - h.c[1];
-          const d = dx * dx + dy * dy;
-          if (d < bd) {
-            bd = d;
-            bz = z.id;
-          }
-        }
-        h.zoneId = bz;
-      }
-      assignedGameRef.current = snap.gameId;
+    if (regionsGameRef.current !== snap.gameId || !regionsRef.current.length) {
+      regionsRef.current = computeRegions(worldFeaturesRef.current, snap, nameToIso.current);
+      regionsGameRef.current = snap.gameId;
     }
 
-    const zonesById = new Map(snap.allZones.map((z) => [z.id, z]));
+    const owner = new Map(snap.allZones.map((z) => [z.id, z.ownerIso]));
     const enemy = new Set(snap.countries.filter((c) => c.atWar).map((c) => c.iso3));
     const playerIso = snap.player.iso3;
-    const features: GeoJSON.Feature[] = base.map((h) => {
-      const zone = h.zoneId ? zonesById.get(h.zoneId) : undefined;
-      let color = "#1b3a55";
-      if (zone) color = zone.ownerIso === playerIso ? "#16a34a" : enemy.has(zone.ownerIso) ? "#b91c1c" : "#2a5f86";
-      return {
-        type: "Feature",
-        properties: { color, zoneId: h.zoneId ?? "" },
-        geometry: { type: "Polygon", coordinates: [h.ring] },
-      };
-    });
+    const features = regionsRef.current.map((f) => ({
+      ...f,
+      properties: { zoneId: f.properties!.zoneId, color: zoneColor(owner.get(f.properties!.zoneId as string), playerIso, enemy) },
+    }));
     src.setData({ type: "FeatureCollection", features });
   }, []);
 
@@ -359,11 +386,16 @@ export default function WorldMap() {
         for (const mk of labelsRef.current) mk.getElement().style.display = show ? "" : "none";
       });
 
-      const selectZone = (zoneId?: string) => {
+      // Two-stage tap: first tap just highlights a zone, second opens management.
+      const onZone = (zoneId?: string) => {
         if (!zoneId) return;
-        selectTerritory(zoneId);
-        const z = snapshotRef.current?.allZones.find((x) => x.id === zoneId);
-        if (z) selectCountry(z.ownerIso);
+        const st = useGameStore.getState();
+        if (st.highlightedZoneId === zoneId) {
+          st.selectTerritory(zoneId);
+        } else {
+          st.highlightZone(zoneId);
+          st.selectTerritory(null);
+        }
       };
 
       map.on("load", () => {
@@ -371,7 +403,6 @@ export default function WorldMap() {
         map.resize();
         setStatus("ready");
 
-        // Icon images.
         for (const [type, letter] of Object.entries(UNIT_LETTER)) {
           if (!map.hasImage(type)) map.addImage(type, unitChip(letter, "#34d399"), { pixelRatio: 2 });
         }
@@ -381,32 +412,23 @@ export default function WorldMap() {
 
         const empty: GeoJSON.FeatureCollection = { type: "FeatureCollection", features: [] };
 
-        // Base land (shows through hex gaps) + country outlines.
         map.addSource("world", { type: "geojson", data: "/world.geojson" });
         map.addLayer({ id: "world-fill", type: "fill", source: "world", paint: { "fill-color": "#0f2236", "fill-opacity": 1 } });
 
-        // Tactical hex blocks — coloured by each block's owning zone.
-        map.addSource("hexgrid", { type: "geojson", data: empty });
-        map.addLayer({ id: "hexgrid-fill", type: "fill", source: "hexgrid", paint: { "fill-color": ["get", "color"], "fill-opacity": 0.7 } });
-        map.addLayer({ id: "hexgrid-line", type: "line", source: "hexgrid", paint: { "line-color": "#0a1622", "line-width": 0.3, "line-opacity": 0.5 } });
+        // Zone regions (Voronoi cells clipped to the country).
+        map.addSource("zoneregions", { type: "geojson", data: empty });
+        map.addLayer({ id: "zoneregions-fill", type: "fill", source: "zoneregions", paint: { "fill-color": ["get", "color"], "fill-opacity": 0.75 } });
+        map.addLayer({ id: "zoneregions-line", type: "line", source: "zoneregions", paint: { "line-color": "#06121e", "line-width": 0.6, "line-opacity": 0.6 } });
         map.addLayer({
-          id: "hexgrid-selected",
+          id: "zone-selected",
           type: "line",
-          source: "hexgrid",
-          paint: { "line-color": "#fef08a", "line-width": 1.6, "line-opacity": 0.95 },
+          source: "zoneregions",
+          paint: { "line-color": "#fde047", "line-width": 2.2, "line-opacity": 0.95 },
           filter: ["==", ["get", "zoneId"], "__none__"],
         });
 
-        map.addLayer({
-          id: "selected-glow",
-          type: "line",
-          source: "world",
-          paint: { "line-color": "#fef08a", "line-width": 2.5, "line-blur": 3, "line-opacity": 0.9 },
-          filter: ["==", ["get", "name"], "__none__"],
-        });
-        map.addLayer({ id: "world-border", type: "line", source: "world", paint: { "line-color": "#22d3ee", "line-width": 0.6, "line-opacity": 0.55 } });
+        map.addLayer({ id: "world-border", type: "line", source: "world", paint: { "line-color": "#22d3ee", "line-width": 0.7, "line-opacity": 0.5 } });
 
-        // Zone type icons (one per block).
         map.addSource("zones", { type: "geojson", data: empty });
         map.addLayer({
           id: "zone-icons",
@@ -429,28 +451,20 @@ export default function WorldMap() {
           layout: { "icon-image": ["coalesce", ["get", "icon"], "UNIT"], "icon-size": 0.55, "icon-allow-overlap": true, "icon-ignore-placement": true },
         });
 
-        // Load hex geometry once, tagged with each hex's country, then colour it.
-        fetch("/hexes.json")
+        fetch("/world.geojson")
           .then((r) => r.json())
-          .then((data: { r: number; names: string[]; hexes: [number, number, number][] }) => {
-            hexBaseRef.current = data.hexes.map(([lng, lat, idx]) => ({
-              c: [lng, lat],
-              ring: hexRing(lng, lat, data.r),
-              name: data.names[idx],
-              zoneId: null,
-            }));
-            assignedGameRef.current = null;
-            refreshHexes();
+          .then((data: GeoJSON.FeatureCollection) => {
+            worldFeaturesRef.current = data.features;
+            refreshZones();
           })
-          .catch((e) => console.error("[WorldMap] hexes load failed", e));
+          .catch((e) => console.error("[WorldMap] world geojson load failed", e));
 
-        for (const layer of ["hexgrid-fill", "zone-icons"]) {
-          map.on("click", layer, (e) => selectZone(e.features?.[0]?.properties?.zoneId || e.features?.[0]?.properties?.id));
+        for (const layer of ["zoneregions-fill", "zone-icons"]) {
+          map.on("click", layer, (e) => onZone((e.features?.[0]?.properties?.zoneId || e.features?.[0]?.properties?.id) as string | undefined));
           map.on("mouseenter", layer, () => (map.getCanvas().style.cursor = "pointer"));
           map.on("mouseleave", layer, () => (map.getCanvas().style.cursor = ""));
         }
 
-        // Hover label for country names.
         const popup = new maplibregl.Popup({ closeButton: false, closeOnClick: false, className: "wd-popup", offset: 8 });
         popupRef.current = popup;
         map.on("mousemove", "world-fill", (e) => {
@@ -472,9 +486,9 @@ export default function WorldMap() {
       mapRef.current?.remove();
       mapRef.current = null;
     };
-  }, [selectCountry, selectTerritory, refreshHexes]);
+  }, [refreshZones]);
 
-  // Push snapshot data into the map sources whenever it changes.
+  // Push snapshot data into the map whenever it changes.
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !snapshot) return;
@@ -508,28 +522,25 @@ export default function WorldMap() {
             return new gl.Marker({ element: el, anchor: "center" }).setLngLat([c.lng, c.lat]).addTo(map);
           });
       }
-      refreshHexes();
+      refreshZones();
     };
     if (map.isStyleLoaded()) apply();
     else map.once("idle", apply);
-  }, [snapshot, refreshHexes]);
+  }, [snapshot, refreshZones]);
 
-  // Highlight the selected zone's hexes + glow its country.
+  // Highlight the highlighted/selected zone + glow its country.
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !snapshot) return;
     const set = () => {
-      if (map.getLayer("hexgrid-selected")) {
-        map.setFilter("hexgrid-selected", ["==", ["get", "zoneId"], selectedTerritoryId ?? "__none__"]);
-      }
-      if (map.getLayer("selected-glow")) {
-        const country = snapshot.countries.find((c) => c.iso3 === selectedCountryIso);
-        map.setFilter("selected-glow", ["in", ["get", "name"], ["literal", country ? expandNames([country.name]) : ["__none__"]]]);
+      if (map.getLayer("zone-selected")) {
+        const ids = [highlightedZoneId, selectedTerritoryId].filter(Boolean) as string[];
+        map.setFilter("zone-selected", ["in", ["get", "zoneId"], ["literal", ids.length ? ids : ["__none__"]]]);
       }
     };
     if (map.isStyleLoaded()) set();
     else map.once("idle", set);
-  }, [selectedTerritoryId, selectedCountryIso, snapshot]);
+  }, [highlightedZoneId, selectedTerritoryId, snapshot]);
 
   return (
     <>

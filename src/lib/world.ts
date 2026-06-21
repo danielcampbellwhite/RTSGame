@@ -142,20 +142,26 @@ function sectorsFor(seed: CountrySeed): Sector[] {
     const each = seed.population / known.length;
     return known.map((s) => ({ name: s.name, kind: s.kind as TerritoryKind, lng: s.lng, lat: s.lat, population: each }));
   }
-  // Procedural sectors fanned around the capital.
-  const n = seed.population > 100 ? 5 : seed.population > 20 ? 4 : 3;
+  // Procedural sectors fanned around the capital. Denser (more populous)
+  // countries naturally get more zones.
+  const pop = seed.population;
+  const n = pop > 500 ? 9 : pop > 200 ? 8 : pop > 100 ? 7 : pop > 50 ? 6 : pop > 20 ? 5 : pop > 5 ? 4 : 3;
   const each = seed.population / n;
   const out: Sector[] = [
     { name: `${seed.name} Capital`, kind: "CAPITAL", lng: seed.capital[0], lat: seed.capital[1], population: each },
   ];
   const kinds: TerritoryKind[] = ["MAJOR_CITY", "INDUSTRIAL", "PORT", "RURAL"];
+  // Golden-angle spiral with growing radius spreads zones across the country so
+  // their Voronoi cells partition it naturally rather than as a flat ring.
+  const golden = Math.PI * (3 - Math.sqrt(5));
   for (let i = 1; i < n; i++) {
-    const ang = (i / n) * Math.PI * 2;
+    const ang = i * golden;
+    const rad = 1.1 + 2.6 * Math.sqrt(i / n);
     out.push({
       name: `${seed.name} Region ${i}`,
       kind: kinds[(i - 1) % kinds.length],
-      lng: seed.capital[0] + Math.cos(ang) * 2.5,
-      lat: seed.capital[1] + Math.sin(ang) * 2.0,
+      lng: seed.capital[0] + Math.cos(ang) * rad * 1.3,
+      lat: seed.capital[1] + Math.sin(ang) * rad,
       population: each,
     });
   }
