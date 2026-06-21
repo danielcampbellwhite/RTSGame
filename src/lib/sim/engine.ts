@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/db";
-import { TICK, ECONOMY, MORALE, WORLD_EVENTS, RESEARCH } from "@/lib/balance";
+import { TICK, ECONOMY, MORALE, WORLD_EVENTS, RESEARCH, BUDGET } from "@/lib/balance";
 import { forceStrength } from "@/lib/units";
 import { TECH_BY_KEY, type TechNode } from "@/data/tech";
 import { stepTrade } from "@/lib/sim/trade";
@@ -156,6 +156,7 @@ export async function catchUp(gameId: string, now: Date = new Date()): Promise<v
           stability: clamp(c.stability),
           morale: clamp(c.morale),
           population: c.population,
+          infrastructure: clamp(c.infrastructure),
         },
       })
     ),
@@ -214,12 +215,28 @@ export async function catchUp(gameId: string, now: Date = new Date()): Promise<v
 // ── ECONOMY ──────────────────────────────────────────────────────────────
 function stepEconomy(c: CountryFull, dtMs: number, militaryStrength: number): void {
   const dtScale = dtMs / 60_000;
+  const dayFrac = dtScale / BUDGET.minutesPerDay;
   const efficiency = (c.stability / 100) * 0.6 + (c.infrastructure / 100) * 0.4;
   const revenue = c.gdp * (c.taxRate / 100) * ECONOMY.baseTaxYield * efficiency * dtScale;
 
   // Real military upkeep, super-linear to punish unit spam.
   const upkeep = Math.pow(militaryStrength, ECONOMY.upkeepExponent) * ECONOMY.upkeepPerStrength * dtScale;
-  c.money += revenue - upkeep;
+
+  // Discretionary spending: every budget lever draws from the treasury, so tax
+  // (income) must cover military + welfare + infrastructure + research (outlays).
+  const spendPct = (c.militaryBudgetPct + c.welfareBudgetPct + c.infraBudgetPct + c.researchBudgetPct) / 100;
+  const spending = c.gdp * spendPct * BUDGET.spendPerDayAt100 * dayFrac;
+
+  c.money += revenue - upkeep - spending;
+
+  // Military budget mobilises manpower (capped at the total population pool).
+  c.manpower = Math.min(
+    c.population,
+    c.manpower + c.population * (c.militaryBudgetPct / 100) * BUDGET.mobilizationPerDayAt100 * dayFrac
+  );
+  // Infrastructure budget sustains the national infrastructure level (which
+  // feeds economic efficiency above) by drifting it toward the allocation.
+  c.infrastructure = clamp(c.infrastructure + (c.infraBudgetPct - c.infrastructure) * BUDGET.infraDriftPerDay * dayFrac);
 
   const prod = buildingProduction(c);
   c.food += prod.food * dtScale;
@@ -261,6 +278,8 @@ function stepMorale(
   const dtScale = dtMs / 60_000;
   const taxPenalty = Math.max(0, c.taxRate - MORALE.comfortableTax) * MORALE.taxPenaltyPerPoint;
   const foodShort = c.food < 0 ? MORALE.foodShortagePenalty : 0;
+  // Welfare spending lifts the baseline the population settles toward.
+  const welfareBoost = (c.welfareBudgetPct / 100) * BUDGET.welfareMoraleAt100;
 
   let aggMorale = 0;
   let owned = 0;
@@ -268,7 +287,7 @@ function stepMorale(
     if (t.countryId !== c.id) continue;
     owned++;
     const occ = t.occupied ? MORALE.occupationPenalty : 0;
-    const target = 60 - taxPenalty * 10 - foodShort * 5 - occ * 5;
+    const target = 60 + welfareBoost - taxPenalty * 10 - foodShort * 5 - occ * 5;
     t.morale += (target - t.morale) * MORALE.driftToTarget * dtScale * 0.1;
     t.unrest += (t.morale < 35 ? 0.4 : -0.2) * dtScale;
     t.unrest = clamp(t.unrest);

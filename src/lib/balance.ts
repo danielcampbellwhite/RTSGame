@@ -36,6 +36,22 @@ export const MORALE = {
   driftToTarget: 0.1,
 } as const;
 
+export const BUDGET = {
+  /** Each discretionary budget (military/welfare/infra/research) spends this
+   *  fraction of GDP per day at 100% allocation. Tax revenue funds the pool;
+   *  over-spending pushes the treasury into deficit. */
+  spendPerDayAt100: 0.1,
+  /** Welfare: national morale-target bonus at 100% welfare budget. */
+  welfareMoraleAt100: 14,
+  /** Infrastructure: fraction of the gap to the budget % closed per day. */
+  infraDriftPerDay: 0.5,
+  /** Military: manpower mobilised per day at 100%, as a fraction of population
+   *  (capped at total population). */
+  mobilizationPerDayAt100: 0.02,
+  /** Minutes of dtScale in a day (dtScale = ms / 60_000). */
+  minutesPerDay: 1440,
+} as const;
+
 export const CONSTRUCTION = {
   // Build duration (ms) and steel/money cost by building "tier".
   fastMs: 4 * 3_600_000, // 4h  (housing, farm, road)

@@ -22,6 +22,7 @@ import {
 } from "@/app/actions";
 import type { WorldSnapshot } from "@/lib/snapshot";
 import { buildingCost } from "@/lib/buildings";
+import { ECONOMY, MORALE, BUDGET } from "@/lib/balance";
 import { UNIT_STATS, maxRange } from "@/lib/units";
 import type { BuildingType, UnitType, TradeGood } from "@prisma/client";
 
@@ -133,7 +134,7 @@ function PolicyTab({ snapshot }: { snapshot: WorldSnapshot }) {
     });
   }, [p.taxRate, p.militaryBudgetPct, p.welfareBudgetPct, p.infraBudgetPct, p.researchBudgetPct]);
 
-  const slider = (key: keyof typeof levers, label: string) => (
+  const slider = (key: keyof typeof levers, label: string, hint: React.ReactNode) => (
     <label className="block text-xs">
       <div className="flex justify-between text-cyan-200/85">
         <span>{label}</span>
@@ -147,8 +148,25 @@ function PolicyTab({ snapshot }: { snapshot: WorldSnapshot }) {
         onChange={(e) => setLevers({ ...levers, [key]: Number(e.target.value) })}
         className="w-full accent-[var(--wd-cyan)]"
       />
+      <div className="text-[10px] leading-tight text-cyan-200/65">{hint}</div>
     </label>
   );
+
+  // ── Live "what this does" projections from the actual sim formulas. ──
+  const PER_DAY = BUDGET.minutesPerDay;
+  const eff = (p.stability / 100) * 0.6 + (p.infrastructure / 100) * 0.4;
+  const totalStrength = [...snapshot.armies, ...snapshot.fleets].reduce((s, f) => s + f.strength, 0);
+  const revenueDay = p.gdp * (levers.taxRate / 100) * ECONOMY.baseTaxYield * eff * PER_DAY;
+  const upkeepDay = Math.pow(totalStrength, ECONOMY.upkeepExponent) * ECONOMY.upkeepPerStrength * PER_DAY;
+  const spendPct = (levers.militaryBudgetPct + levers.welfareBudgetPct + levers.infraBudgetPct + levers.researchBudgetPct) / 100;
+  const spendDay = p.gdp * spendPct * BUDGET.spendPerDayAt100;
+  const netDay = revenueDay - upkeepDay - spendDay;
+  const manpowerDay = p.population * (levers.militaryBudgetPct / 100) * BUDGET.mobilizationPerDayAt100;
+  const welfareMorale = (levers.welfareBudgetPct / 100) * BUDGET.welfareMoraleAt100;
+  const taxMoraleHit = Math.max(0, levers.taxRate - MORALE.comfortableTax) * MORALE.taxPenaltyPerPoint * 10;
+  const moraleTarget = Math.max(0, Math.min(100, 60 + welfareMorale - taxMoraleHit));
+  const researchSpeed = Math.max(5, levers.researchBudgetPct) / 50; // 50% = neutral baseline
+  const money = (n: number) => `${n >= 0 ? "+" : "−"}$${Math.abs(n) >= 1000 ? `${(Math.abs(n) / 1000).toFixed(1)}k` : Math.abs(n).toFixed(0)}b`;
 
   const r = snapshot.rankings;
   return (
@@ -158,15 +176,79 @@ function PolicyTab({ snapshot }: { snapshot: WorldSnapshot }) {
         <Rank label="Influence" rank={r.influence} total={r.total} />
         <Rank label="Territory" rank={r.territory} total={r.total} />
       </div>
-      {slider("taxRate", "Tax Rate")}
-      {slider("militaryBudgetPct", "Military")}
-      {slider("welfareBudgetPct", "Welfare")}
-      {slider("infraBudgetPct", "Infrastructure")}
-      {slider("researchBudgetPct", "Research")}
+
+      {slider(
+        "taxRate",
+        "Tax Rate",
+        <>
+          Revenue <span className="text-[var(--wd-green)]">{money(revenueDay)}/day</span>
+          {levers.taxRate > MORALE.comfortableTax && (
+            <> · morale <span className="text-[var(--wd-red)]">−{taxMoraleHit.toFixed(0)}</span> (over {MORALE.comfortableTax}%)</>
+          )}
+        </>
+      )}
+      {slider(
+        "militaryBudgetPct",
+        "Military",
+        <>
+          Mobilises <span className="text-cyan-200/90">+{manpowerDay.toFixed(1)} manpower/day</span> · costs{" "}
+          <span className="text-[var(--wd-red)]">{money(-p.gdp * (levers.militaryBudgetPct / 100) * BUDGET.spendPerDayAt100)}/day</span>
+        </>
+      )}
+      {slider(
+        "welfareBudgetPct",
+        "Welfare",
+        <>
+          Morale target <span className="text-[var(--wd-green)]">+{welfareMorale.toFixed(0)}</span> · costs{" "}
+          <span className="text-[var(--wd-red)]">{money(-p.gdp * (levers.welfareBudgetPct / 100) * BUDGET.spendPerDayAt100)}/day</span>
+        </>
+      )}
+      {slider(
+        "infraBudgetPct",
+        "Infrastructure",
+        <>
+          Infrastructure → <span className="text-cyan-200/90">{levers.infraBudgetPct.toFixed(0)}%</span> (now {p.infrastructure.toFixed(0)}) · drives economy efficiency
+        </>
+      )}
+      {slider(
+        "researchBudgetPct",
+        "Research",
+        <>
+          Research speed <span className="text-[var(--wd-cyan)]">×{researchSpeed.toFixed(1)}</span> · costs{" "}
+          <span className="text-[var(--wd-red)]">{money(-p.gdp * (levers.researchBudgetPct / 100) * BUDGET.spendPerDayAt100)}/day</span>
+        </>
+      )}
+
+      <div className="mt-1 rounded border border-[var(--wd-border)] p-1.5 text-[10px]">
+        <div className="mb-0.5 uppercase tracking-widest text-cyan-200/70">Projected / day</div>
+        <div className="flex justify-between">
+          <span className="text-cyan-200/80">Revenue</span>
+          <span className="text-[var(--wd-green)]">{money(revenueDay)}</span>
+        </div>
+        <div className="flex justify-between">
+          <span className="text-cyan-200/80">Spending</span>
+          <span className="text-[var(--wd-red)]">{money(-spendDay)}</span>
+        </div>
+        <div className="flex justify-between">
+          <span className="text-cyan-200/80">Military upkeep</span>
+          <span className="text-[var(--wd-red)]">{money(-upkeepDay)}</span>
+        </div>
+        <div className="mt-0.5 flex justify-between border-t border-[var(--wd-border)] pt-0.5 font-bold">
+          <span>Net treasury</span>
+          <span style={{ color: netDay >= 0 ? "var(--wd-green)" : "var(--wd-red)" }}>{money(netDay)}</span>
+        </div>
+        <div className="mt-0.5 flex justify-between">
+          <span className="text-cyan-200/80">Morale settles toward</span>
+          <span style={{ color: moraleTarget >= 50 ? "var(--wd-green)" : "var(--wd-amber)" }}>{moraleTarget.toFixed(0)}</span>
+        </div>
+      </div>
+
       <Btn disabled={isPending} onClick={() => run(() => setBudget(snapshot.gameId, levers))}>
         {isPending ? "Applying…" : "Apply Policy"}
       </Btn>
-      <p className="text-[10px] text-cyan-200/70">High tax erodes morale; military upkeep grows super-linearly.</p>
+      <p className="text-[10px] text-cyan-200/70">
+        Tax funds the treasury but high rates erode morale; every budget draws from it. Projections assume current GDP, and update as you drag.
+      </p>
     </div>
   );
 }
