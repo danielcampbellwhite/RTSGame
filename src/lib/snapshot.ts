@@ -12,6 +12,13 @@ export interface CountryDot {
   isAlive: boolean;
 }
 
+export interface BuildingView {
+  type: string;
+  level: number;
+  buildingToLevel: number | null;
+  completesAt: string | null;
+}
+
 export interface TerritoryView {
   id: string;
   name: string;
@@ -23,6 +30,7 @@ export interface TerritoryView {
   unrest: number;
   controlPct: number;
   occupied: boolean;
+  buildings: BuildingView[];
 }
 
 export interface ArmyView {
@@ -140,6 +148,13 @@ export async function getWorldSnapshot(gameId: string): Promise<WorldSnapshot | 
     take: 40,
   });
 
+  // Player's own sectors enriched with their buildings (for the territory panel).
+  const playerTerritories = await prisma.territory.findMany({
+    where: { countryId: player.id },
+    include: { buildings: true },
+    orderBy: { population: "desc" },
+  });
+
   const [armies, relations, wars, tradeRoutes, research] = await Promise.all([
     prisma.army.findMany({ where: { countryId: player.id }, include: { units: true } }),
     prisma.diplomaticRelation.findMany({ where: { fromId: player.id }, include: { to: true } }),
@@ -223,7 +238,7 @@ export async function getWorldSnapshot(gameId: string): Promise<WorldSnapshot | 
         manpower: player.manpower,
       },
     },
-    territories: player.territories.map((t) => ({
+    territories: playerTerritories.map((t) => ({
       id: t.id,
       name: t.name,
       kind: t.kind,
@@ -234,6 +249,12 @@ export async function getWorldSnapshot(gameId: string): Promise<WorldSnapshot | 
       unrest: t.unrest,
       controlPct: t.controlPct,
       occupied: t.occupied,
+      buildings: t.buildings.map((b) => ({
+        type: b.type,
+        level: b.level,
+        buildingToLevel: b.buildingToLevel,
+        completesAt: b.completesAt ? b.completesAt.toISOString() : null,
+      })),
     })),
     countries: countries.map((c) => ({
       iso3: c.iso3,

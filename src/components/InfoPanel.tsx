@@ -16,7 +16,17 @@ import {
   startResearch,
 } from "@/app/actions";
 import type { WorldSnapshot } from "@/lib/snapshot";
+import { buildingCost } from "@/lib/buildings";
 import type { BuildingType, UnitType, TradeGood } from "@prisma/client";
+
+// Short "ready in" countdown for an ISO timestamp.
+function eta(iso: string): string {
+  const ms = new Date(iso).getTime() - Date.now();
+  if (ms <= 0) return "ready";
+  const h = ms / 3_600_000;
+  if (h >= 1) return `${h.toFixed(0)}h`;
+  return `${Math.max(1, Math.round(ms / 60_000))}m`;
+}
 
 type Tab = "policy" | "military" | "diplomacy" | "trade" | "research";
 
@@ -367,6 +377,10 @@ const BUILD_OPTIONS: { type: BuildingType; label: string }[] = [
 
 function TerritoryPanel({ snapshot, territory }: { snapshot: WorldSnapshot; territory: WorldSnapshot["territories"][number] }) {
   const { run, isPending } = useAction();
+  const money = snapshot.player.resources.money;
+  const steel = snapshot.player.resources.steel;
+  const byType = new Map(territory.buildings.map((b) => [b.type, b]));
+
   return (
     <Shell title={territory.name} subtitle={territory.kind}>
       <Bar label="Population" value={`${territory.population.toFixed(1)}M`} />
@@ -375,14 +389,43 @@ function TerritoryPanel({ snapshot, territory }: { snapshot: WorldSnapshot; terr
       <Bar label="Control" value={`${territory.controlPct.toFixed(0)}%`} pct={territory.controlPct} />
       {territory.occupied && <div className="text-xs text-[var(--wd-red)]">⚠ Under occupation</div>}
 
-      <Section label="Construction">
-        <div className="grid grid-cols-2 gap-1">
-          {BUILD_OPTIONS.map((b) => (
-            <Btn key={b.type} small disabled={isPending} onClick={() => run(() => queueBuilding(snapshot.gameId, territory.id, b.type))}>
-              + {b.label}
-            </Btn>
+      {territory.buildings.length > 0 && (
+        <Section label="Buildings">
+          {territory.buildings.map((b) => (
+            <div key={b.type} className="flex items-center justify-between text-[11px]">
+              <span className="text-cyan-200/80">
+                {b.type.replace(/_/g, " ").toLowerCase()} <span className="text-[var(--wd-cyan)]">Lv{b.level}</span>
+              </span>
+              {b.completesAt ? (
+                <span className="text-[var(--wd-amber)]">→ Lv{b.buildingToLevel} · {eta(b.completesAt)}</span>
+              ) : null}
+            </div>
           ))}
+        </Section>
+      )}
+
+      <Section label="Build / Upgrade">
+        <div className="grid grid-cols-2 gap-1">
+          {BUILD_OPTIONS.map((b) => {
+            const existing = byType.get(b.type);
+            const target = (existing?.level ?? 0) + 1;
+            const cost = buildingCost(b.type, target);
+            const busy = !!existing?.completesAt;
+            const afford = money >= cost.money && steel >= cost.steel;
+            return (
+              <Btn
+                key={b.type}
+                small
+                disabled={isPending || busy || !afford}
+                onClick={() => run(() => queueBuilding(snapshot.gameId, territory.id, b.type))}
+              >
+                {existing ? `▲ ${b.label} Lv${target}` : `+ ${b.label}`}
+                <span className="ml-1 text-[9px] text-cyan-200/40">{cost.money}₵ {cost.steel}▮</span>
+              </Btn>
+            );
+          })}
         </div>
+        <div className="text-[10px] text-cyan-200/40">Cost: ₵ treasury + ▮ steel. Higher levels cost more.</div>
       </Section>
 
       {snapshot.armies.length > 0 && (

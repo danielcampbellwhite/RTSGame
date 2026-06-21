@@ -4,7 +4,8 @@ import { prisma } from "@/lib/db";
 import { catchUp } from "@/lib/sim/engine";
 import { createGameWorld } from "@/lib/world";
 import { getWorldSnapshot, type WorldSnapshot } from "@/lib/snapshot";
-import { CONSTRUCTION, DIPLOMACY } from "@/lib/balance";
+import { DIPLOMACY } from "@/lib/balance";
+import { buildingCost, buildingDurationMs } from "@/lib/buildings";
 import { recruit, orderMove } from "@/lib/sim/forces";
 import { startResearchProject } from "@/lib/sim/research";
 import { declareWar as declareWarCore, endWar, adjustOpinion, setFlags } from "@/lib/sim/diplomacy";
@@ -65,10 +66,34 @@ export async function queueBuilding(gameId: string, territoryId: string, type: B
   });
   if (!territory || !territory.country.isPlayer || territory.country.gameId !== gameId) return null;
 
-  const duration = buildDuration(type);
   const existing = territory.buildings.find((b) => b.type === type);
-  const completesAt = new Date(Date.now() + duration);
+  // Block stacking another upgrade while one is already in progress.
+  if (existing?.completesAt) return getWorldSnapshot(gameId);
 
+  const targetLevel = (existing?.level ?? 0) + 1;
+  const cost = buildingCost(type, targetLevel);
+  const c = territory.country;
+  if (c.money < cost.money || c.steel < cost.steel) {
+    await prisma.gameEvent.create({
+      data: {
+        gameId,
+        scope: "COUNTRY",
+        category: "CONSTRUCTION",
+        title: `Cannot afford ${type} in ${territory.name}`,
+        body: `Needs ${cost.money.toFixed(0)}₵ and ${cost.steel.toFixed(0)} steel.`,
+        countryIso: c.iso3,
+        severity: 2,
+      },
+    });
+    return getWorldSnapshot(gameId);
+  }
+
+  await prisma.country.update({
+    where: { id: c.id },
+    data: { money: { decrement: cost.money }, steel: { decrement: cost.steel } },
+  });
+
+  const completesAt = new Date(Date.now() + buildingDurationMs(type));
   if (existing) {
     await prisma.building.update({
       where: { id: existing.id },
@@ -189,14 +214,6 @@ export async function startResearch(gameId: string, techKey: string) {
   if (p) await startResearchProject(p.id, techKey);
   revalidatePath("/");
   return getWorldSnapshot(gameId);
-}
-
-function buildDuration(type: BuildingType): number {
-  const fast: BuildingType[] = ["HOUSING", "FARM", "ROAD"];
-  const slow: BuildingType[] = ["MISSILE_SILO", "NAVAL_BASE", "AIRPORT", "AIR_BASE"];
-  if (fast.includes(type)) return CONSTRUCTION.fastMs;
-  if (slow.includes(type)) return CONSTRUCTION.slowMs;
-  return CONSTRUCTION.medMs;
 }
 
 function clampPct(v: number): number {
