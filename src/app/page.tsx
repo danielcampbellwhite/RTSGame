@@ -170,11 +170,9 @@ export default function Page() {
     >
       {showOnboarding && <Onboarding onClose={closeOnboarding} />}
 
-      <div className="flex min-w-0 shrink-0 gap-2 overflow-hidden">
-        <TimeControl />
-        <div className="min-w-0 flex-1">
-          <ResourceBar />
-        </div>
+      {/* Top: country info */}
+      <div className="min-w-0">
+        <ResourceBar />
       </div>
 
       <div className="relative min-h-0 min-w-0 md:grid md:grid-cols-[1fr_340px] md:grid-rows-[minmax(0,1fr)_7rem] md:gap-2">
@@ -202,24 +200,27 @@ export default function Page() {
         </div>
       </div>
 
-      {/* Mobile-only tab bar */}
-      <div className="flex min-w-0 shrink-0 gap-1 md:hidden">
-        {(["map", "info", "feed"] as const).map((t) => (
-          <button
-            key={t}
-            onClick={() => setMobileTab(t)}
-            className={`panel relative min-w-0 flex-1 truncate rounded py-3 text-xs uppercase tracking-wide ${
-              mobileTab === t ? "text-[var(--wd-cyan)] glow-border" : "text-cyan-200/50"
-            }`}
-          >
-            {t === "map" ? "Map" : t === "info" ? "Command" : "Feed"}
-            {t === "feed" && unread > 0 && (
-              <span className="pulse absolute right-1 top-1 min-w-4 rounded-full bg-[var(--wd-red)] px-1 text-[9px] leading-4 text-white">
-                {unread}
-              </span>
-            )}
-          </button>
-        ))}
+      {/* Bottom: time controls (always) + mobile navigation tabs */}
+      <div className="flex min-w-0 flex-col gap-2">
+        <TimeControl />
+        <div className="flex min-w-0 gap-1 md:hidden">
+          {(["map", "info", "feed"] as const).map((t) => (
+            <button
+              key={t}
+              onClick={() => setMobileTab(t)}
+              className={`panel relative min-w-0 flex-1 truncate rounded py-3 text-xs uppercase tracking-wide ${
+                mobileTab === t ? "text-[var(--wd-cyan)] glow-border" : "text-cyan-200/50"
+              }`}
+            >
+              {t === "map" ? "Map" : t === "info" ? "Command" : "Feed"}
+              {t === "feed" && unread > 0 && (
+                <span className="pulse absolute right-1 top-1 min-w-4 rounded-full bg-[var(--wd-red)] px-1 text-[9px] leading-4 text-white">
+                  {unread}
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
       </div>
     </div>
   );
