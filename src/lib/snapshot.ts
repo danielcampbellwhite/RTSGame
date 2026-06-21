@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/db";
 import { catchUp } from "@/lib/sim/engine";
-import { TECH_TREE } from "@/data/tech";
+import { TECH_TREE, describeEffect } from "@/data/tech";
 import { FOG } from "@/lib/balance";
 import { UNIT_STATS } from "@/lib/units";
 
@@ -100,6 +100,7 @@ export interface ResearchView {
   category: string;
   progress: number;
   completed: boolean;
+  effect: string;
 }
 
 export interface WorldSnapshot {
@@ -145,7 +146,7 @@ export interface WorldSnapshot {
   warTargets: WarTargetView[];
   tradeRoutes: TradeRouteView[];
   research: ResearchView[];
-  availableTech: { key: string; name: string; category: string; days: number; requires: string[] }[];
+  availableTech: { key: string; name: string; category: string; days: number; requires: string[]; effect: string }[];
   events: { id: string; title: string; category: string; severity: number; createdAt: string }[];
 }
 
@@ -411,19 +412,24 @@ export async function getWorldSnapshot(gameId: string): Promise<WorldSnapshot | 
       ratePerDay: t.ratePerDay,
       blockaded: t.blockaded,
     })),
-    research: research.map((r) => ({
-      techKey: r.techKey,
-      name: TECH_TREE.find((t) => t.key === r.techKey)?.name ?? r.techKey,
-      category: r.category,
-      progress: r.progress,
-      completed: r.completed,
-    })),
+    research: research.map((r) => {
+      const node = TECH_TREE.find((t) => t.key === r.techKey);
+      return {
+        techKey: r.techKey,
+        name: node?.name ?? r.techKey,
+        category: r.category,
+        progress: r.progress,
+        completed: r.completed,
+        effect: node ? describeEffect(node.effect) : "",
+      };
+    }),
     availableTech: TECH_TREE.filter((t) => !takenTech.has(t.key)).map((t) => ({
       key: t.key,
       name: t.name,
       category: t.category,
       days: t.days,
       requires: t.requires ?? [],
+      effect: describeEffect(t.effect),
     })),
     events: events.map((e) => ({
       id: e.id,

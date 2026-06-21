@@ -23,9 +23,10 @@ export default function Page() {
   const setSnapshot = useGameStore((s) => s.setSnapshot);
   const snapshot = useGameStore((s) => s.snapshot);
   const selectedTerritoryId = useGameStore((s) => s.selectedTerritoryId);
+  const mobileTab = useGameStore((s) => s.mobileTab);
+  const setMobileTab = useGameStore((s) => s.setMobileTab);
   const [gameId, setGameId] = useState<string | null>(null);
   const [booting, setBooting] = useState(true);
-  const [mobileTab, setMobileTab] = useState<"map" | "info" | "feed">("map");
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [unread, setUnread] = useState(0);
   const [muted, setMuted] = useState(false);

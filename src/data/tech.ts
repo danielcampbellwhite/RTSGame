@@ -37,3 +37,15 @@ export const TECH_TREE: TechNode[] = [
 export const TECH_BY_KEY: Record<string, TechNode> = Object.fromEntries(
   TECH_TREE.map((t) => [t.key, t])
 );
+
+/** Plain-language summary of what completing a tech grants the player. */
+export function describeEffect(effect: TechNode["effect"]): string {
+  const parts: string[] = [];
+  const pct = (m: number) => `${m >= 1 ? "+" : "−"}${Math.round(Math.abs(m - 1) * 100)}%`;
+  if (effect.gdpGrowthMult) parts.push(`${pct(effect.gdpGrowthMult)} GDP growth`);
+  if (effect.unitStrengthMult) parts.push(`${pct(effect.unitStrengthMult)} unit strength`);
+  if (effect.resourceYieldMult) parts.push(`${pct(effect.resourceYieldMult)} resource yield`);
+  if (effect.researchSpeedMult) parts.push(`${pct(effect.researchSpeedMult)} research speed`);
+  if (effect.moraleBonus) parts.push(`${effect.moraleBonus >= 0 ? "+" : ""}${effect.moraleBonus} national morale`);
+  return parts.join(" · ") || "No direct bonus";
+}

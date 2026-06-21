@@ -25,6 +25,12 @@ import { buildingCost } from "@/lib/buildings";
 import { UNIT_STATS, maxRange } from "@/lib/units";
 import type { BuildingType, UnitType, TradeGood } from "@prisma/client";
 
+// GDP is in billions; roll over to trillions past 1,000b for readability.
+function fmtGdp(billions: number): string {
+  if (Math.abs(billions) >= 1000) return `$${(billions / 1000).toFixed(2)}t`;
+  return `$${billions.toFixed(0)}b`;
+}
+
 // Short "ready in" countdown for an ISO timestamp.
 function eta(iso: string): string {
   const ms = new Date(iso).getTime() - Date.now();
@@ -375,7 +381,8 @@ function ResearchTab({ snapshot }: { snapshot: WorldSnapshot }) {
                 <span>{r.name}</span>
                 <span className="text-cyan-200/75">{r.progress.toFixed(0)}%</span>
               </div>
-              <div className="h-1 w-full rounded bg-[var(--wd-border)]">
+              {r.effect && <div className="text-[10px] text-[var(--wd-green)]">{r.effect}</div>}
+              <div className="mt-0.5 h-1 w-full rounded bg-[var(--wd-border)]">
                 <div className="h-full rounded bg-[var(--wd-cyan)]" style={{ width: `${r.progress}%` }} />
               </div>
             </div>
@@ -385,10 +392,14 @@ function ResearchTab({ snapshot }: { snapshot: WorldSnapshot }) {
         {snapshot.availableTech.map((t) => {
           const locked = t.requires.some((req) => !completedKeys.has(req));
           return (
-            <div key={t.key} className="flex items-center justify-between text-[11px]">
-              <span className={locked ? "text-cyan-200/60" : ""}>
-                {t.name} <span className="text-cyan-200/70">({t.category.toLowerCase()}, {t.days}d)</span>
-              </span>
+            <div key={t.key} className="flex items-start justify-between gap-2 text-[11px]">
+              <div className={`min-w-0 ${locked ? "text-cyan-200/60" : ""}`}>
+                <div>
+                  {t.name} <span className="text-cyan-200/70">({t.category.toLowerCase()}, {t.days}d)</span>
+                </div>
+                <div className="text-[10px] text-[var(--wd-green)]">{t.effect}</div>
+                {locked && <div className="text-[10px] text-[var(--wd-red)]/80">Requires prior tech</div>}
+              </div>
               <Btn small disabled={isPending || locked} onClick={() => run(() => startResearch(snapshot.gameId, t.key))}>
                 {locked ? "Locked" : "Research"}
               </Btn>
@@ -558,7 +569,7 @@ function CountryPanel({ snapshot, iso, name }: { snapshot: WorldSnapshot; iso: s
   const dot = snapshot.countries.find((c) => c.iso3 === iso);
   return (
     <Shell title={name} subtitle={iso}>
-      <Bar label="GDP" value={`$${(dot?.gdp ?? 0).toFixed(0)}b`} />
+      <Bar label="GDP" value={fmtGdp(dot?.gdp ?? 0)} />
       <Bar label="Opinion" value={(rel?.opinion ?? 0).toFixed(0)} />
       <div className="mt-2 flex flex-col gap-1">
         <Btn small disabled={isPending} onClick={() => run(() => improveRelations(snapshot.gameId, iso))}>
@@ -677,8 +688,7 @@ function ForeignZonePanel({ snapshot, zone }: { snapshot: WorldSnapshot; zone: W
 
 // ── PRIMITIVES ───────────────────────────────────────────────────────────────
 function Shell({ title, subtitle, children }: { title?: string; subtitle?: string; children: React.ReactNode }) {
-  const select = useGameStore((s) => s.selectTerritory);
-  const selectC = useGameStore((s) => s.selectCountry);
+  const closeToMap = useGameStore((s) => s.closeToMap);
   const hasSelection = useGameStore((s) => s.selectedTerritoryId || s.selectedCountryIso);
   return (
     <div className="panel glow-border flex h-full flex-col gap-2 overflow-y-auto scroll-thin p-3">
@@ -690,10 +700,7 @@ function Shell({ title, subtitle, children }: { title?: string; subtitle?: strin
           </div>
           {hasSelection && (
             <button
-              onClick={() => {
-                select(null);
-                selectC(null);
-              }}
+              onClick={closeToMap}
               className="text-[10px] text-cyan-200/75 hover:text-[var(--wd-cyan)]"
             >
               ✕ close

@@ -9,6 +9,13 @@ function fmt(n: number): string {
   return n.toFixed(1);
 }
 
+// GDP is already denominated in billions; roll over to trillions past 1,000b
+// so it never reads as the confusing "kb" (thousand-billions).
+function fmtGdp(billions: number): string {
+  if (Math.abs(billions) >= 1000) return `$${(billions / 1000).toFixed(2)}t`;
+  return `$${billions.toFixed(0)}b`;
+}
+
 type ResourceMap = NonNullable<ReturnType<typeof useGameStore.getState>["snapshot"]>["player"]["resources"];
 
 const RESOURCES: { key: keyof ResourceMap; label: string; color: string }[] = [
@@ -37,7 +44,7 @@ export default function ResourceBar() {
       <Divider />
 
       {/* National standing */}
-      <Chip label="GDP" value={`$${fmt(player.gdp)}b`} color="#7fe9f7" />
+      <Chip label="GDP" value={fmtGdp(player.gdp)} color="#7fe9f7" />
       <Chip label="Stability" value={player.stability.toFixed(0)} color={stat(player.stability)} bar={player.stability} />
       <Chip label="Morale" value={player.morale.toFixed(0)} color={stat(player.morale)} bar={player.morale} />
       <Chip label="Influence" value={player.influence.toFixed(0)} color="#c4b5fd" />
