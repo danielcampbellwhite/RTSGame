@@ -178,7 +178,7 @@ export default function Page() {
         paddingTop: "calc(0.5rem + env(safe-area-inset-top))",
         paddingBottom: "calc(0.5rem + env(safe-area-inset-bottom))",
       }}
-      className="grid w-screen grid-rows-[auto_1fr_auto] gap-2 overflow-hidden px-2"
+      className="grid w-full max-w-full grid-rows-[auto_1fr_auto] gap-2 overflow-hidden px-2"
     >
       {showOnboarding && <Onboarding onClose={closeOnboarding} />}
 
@@ -215,12 +215,12 @@ export default function Page() {
       </div>
 
       {/* Mobile-only tab bar */}
-      <div className="flex shrink-0 gap-1 md:hidden">
+      <div className="flex w-full max-w-full shrink-0 gap-1 md:hidden">
         {(["map", "info", "feed"] as const).map((t) => (
           <button
             key={t}
             onClick={() => setMobileTab(t)}
-            className={`panel relative flex-1 rounded py-3 text-xs uppercase tracking-widest ${
+            className={`panel relative min-w-0 flex-1 truncate rounded py-3 text-xs uppercase tracking-wide ${
               mobileTab === t ? "text-[var(--wd-cyan)] glow-border" : "text-cyan-200/50"
             }`}
           >
