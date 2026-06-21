@@ -56,17 +56,6 @@ function tradeLines(s: WorldSnapshot): GeoJSON.FeatureCollection {
   };
 }
 
-function warPoints(s: WorldSnapshot): GeoJSON.FeatureCollection {
-  return {
-    type: "FeatureCollection",
-    features: s.warTargets.map((w) => ({
-      type: "Feature",
-      properties: { name: w.territoryName },
-      geometry: { type: "Point", coordinates: [w.lng, w.lat] },
-    })),
-  };
-}
-
 // Our dataset names vs world-atlas country names, where they differ.
 const NAME_ALIAS: Record<string, string> = {
   "United States": "United States of America",
@@ -80,6 +69,22 @@ function playerNames(name: string): string[] {
   return alias ? [name, alias] : [name];
 }
 
+function expandNames(names: string[]): string[] {
+  const out: string[] = [];
+  for (const n of names) {
+    out.push(n);
+    if (NAME_ALIAS[n]) out.push(NAME_ALIAS[n]);
+  }
+  return out;
+}
+
+// Single-letter label per unit type for the on-map army icons.
+const UNIT_LETTER: Record<string, string> = {
+  INFANTRY: "I", MECHANIZED: "M", TANK: "T", ARTILLERY: "A", AIR_DEFENSE: "D",
+  FIGHTER: "F", BOMBER: "B", DRONE: "R", TRANSPORT_AIR: "T", FRIGATE: "N",
+  DESTROYER: "D", SUBMARINE: "S", CARRIER: "C", MISSILE: "!", NUKE: "☢", INTEL: "i",
+};
+
 function armyPoints(s: WorldSnapshot): GeoJSON.FeatureCollection {
   const terr = new Map(s.territories.map((t) => [t.id, [t.lng, t.lat] as [number, number]]));
   return {
@@ -88,14 +93,83 @@ function armyPoints(s: WorldSnapshot): GeoJSON.FeatureCollection {
       .map((a) => {
         const c = a.locationTerritoryId ? terr.get(a.locationTerritoryId) : undefined;
         if (!c) return null;
+        const dominant = [...a.units].sort((x, y) => y.count - x.count)[0]?.type;
+        const icon = dominant && UNIT_LETTER[dominant] ? dominant : "UNIT";
         return {
           type: "Feature" as const,
-          properties: { name: a.name, strength: a.strength },
+          properties: { name: a.name, strength: Math.round(a.strength), icon },
           geometry: { type: "Point" as const, coordinates: c },
         };
       })
       .filter(Boolean) as GeoJSON.Feature[],
   };
+}
+
+// Capitals of countries currently fighting any war — for the conflict markers.
+function combatantPoints(s: WorldSnapshot): GeoJSON.FeatureCollection {
+  return {
+    type: "FeatureCollection",
+    features: s.countries
+      .filter((c) => c.isAlive && c.combatant && !c.isPlayer)
+      .map((c) => ({
+        type: "Feature",
+        properties: { name: c.name },
+        geometry: { type: "Point", coordinates: [c.lng, c.lat] },
+      })),
+  };
+}
+
+// Generate a rounded-chip icon (green, with a letter) as raw RGBA for addImage.
+function chipIcon(letter: string, bg: string) {
+  const s = 44;
+  const cv = document.createElement("canvas");
+  cv.width = s;
+  cv.height = s;
+  const ctx = cv.getContext("2d")!;
+  const x = 5, y = 5, w = s - 10, h = s - 10, r = 10;
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+  ctx.fillStyle = bg;
+  ctx.fill();
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = "#04060a";
+  ctx.stroke();
+  ctx.fillStyle = "#04060a";
+  ctx.font = "bold 22px ui-monospace, monospace";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(letter, s / 2, s / 2 + 1);
+  return { width: s, height: s, data: new Uint8Array(ctx.getImageData(0, 0, s, s).data.buffer) };
+}
+
+// Red conflict marker (filled circle with a white "x").
+function warIcon() {
+  const s = 32;
+  const cv = document.createElement("canvas");
+  cv.width = s;
+  cv.height = s;
+  const ctx = cv.getContext("2d")!;
+  ctx.beginPath();
+  ctx.arc(s / 2, s / 2, s / 2 - 4, 0, Math.PI * 2);
+  ctx.fillStyle = "#ef4444";
+  ctx.fill();
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = "#fff";
+  ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(11, 11);
+  ctx.lineTo(21, 21);
+  ctx.moveTo(21, 11);
+  ctx.lineTo(11, 21);
+  ctx.strokeStyle = "#fff";
+  ctx.lineWidth = 3;
+  ctx.stroke();
+  return { width: s, height: s, data: new Uint8Array(ctx.getImageData(0, 0, s, s).data.buffer) };
 }
 
 function webglAvailable(): boolean {
@@ -120,6 +194,7 @@ export default function WorldMap() {
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [msg, setMsg] = useState("");
   const snapshot = useGameStore((s) => s.snapshot);
+  const selectedCountryIso = useGameStore((s) => s.selectedCountryIso);
   const selectCountry = useGameStore((s) => s.selectCountry);
   const selectTerritory = useGameStore((s) => s.selectTerritory);
 
@@ -200,47 +275,59 @@ export default function WorldMap() {
         if (toRef.current) clearTimeout(toRef.current);
         map.resize();
         setStatus("ready");
-        // Real world landmasses + neon country borders (token-free static GeoJSON).
+        // Register icon images (no font glyphs needed for icon-only symbols).
+        for (const [type, letter] of Object.entries(UNIT_LETTER)) {
+          if (!map.hasImage(type)) map.addImage(type, chipIcon(letter, "#34d399"), { pixelRatio: 2 });
+        }
+        if (!map.hasImage("UNIT")) map.addImage("UNIT", chipIcon("•", "#34d399"), { pixelRatio: 2 });
+        if (!map.hasImage("war")) map.addImage("war", warIcon(), { pixelRatio: 2 });
+
+        // Real world landmasses; fill colour-codes status (neutral blue base).
         map.addSource("world", { type: "geojson", data: "/world.geojson" });
         map.addLayer({
           id: "world-fill",
           type: "fill",
           source: "world",
-          paint: { "fill-color": "#13283d", "fill-opacity": 1 },
+          paint: { "fill-color": "#16314d", "fill-opacity": 1 }, // neutral = blue
+        });
+        map.addLayer({
+          id: "enemy-fill",
+          type: "fill",
+          source: "world",
+          paint: { "fill-color": "#b91c1c", "fill-opacity": 0.85 }, // at war = red
+          filter: ["==", ["get", "name"], "__none__"],
         });
         map.addLayer({
           id: "player-fill",
           type: "fill",
           source: "world",
-          paint: { "fill-color": "#f0f", "fill-opacity": 0.22 },
+          paint: { "fill-color": "#16a34a", "fill-opacity": 0.9 }, // player = green
+          filter: ["==", ["get", "name"], "__none__"],
+        });
+        // Glow outline for the currently selected country.
+        map.addLayer({
+          id: "selected-glow",
+          type: "line",
+          source: "world",
+          paint: { "line-color": "#fef08a", "line-width": 2.5, "line-blur": 3, "line-opacity": 0.95 },
           filter: ["==", ["get", "name"], "__none__"],
         });
         map.addLayer({
           id: "world-border",
           type: "line",
           source: "world",
-          paint: { "line-color": "#22d3ee", "line-width": 0.8, "line-opacity": 0.7 },
+          paint: { "line-color": "#22d3ee", "line-width": 0.6, "line-opacity": 0.55 },
         });
 
         map.addSource("countries", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
-        map.addLayer({
-          id: "country-glow",
-          type: "circle",
-          source: "countries",
-          paint: {
-            "circle-radius": ["interpolate", ["linear"], ["get", "gdp"], 0, 4, 27000, 22],
-            "circle-color": ["case", ["==", ["get", "isPlayer"], 1], "#f0f", "#22d3ee"],
-            "circle-blur": 1,
-            "circle-opacity": 0.35,
-          },
-        });
         map.addLayer({
           id: "country-core",
           type: "circle",
           source: "countries",
           paint: {
-            "circle-radius": ["interpolate", ["linear"], ["get", "gdp"], 0, 1.5, 27000, 6],
-            "circle-color": ["case", ["==", ["get", "isPlayer"], 1], "#ff66ff", "#7fe9f7"],
+            "circle-radius": ["interpolate", ["linear"], ["get", "gdp"], 0, 1.2, 27000, 4],
+            "circle-color": "#cbe7f5",
+            "circle-opacity": 0.6,
           },
         });
 
@@ -262,25 +349,32 @@ export default function WorldMap() {
           paint: {
             "circle-radius": 5,
             "circle-color": "rgba(0,0,0,0)",
-            "circle-stroke-color": "#f0f",
+            "circle-stroke-color": "#fef08a",
             "circle-stroke-width": 1.5,
           },
         });
 
+        // Conflict markers on countries fighting any war.
+        map.addSource("warmarkers", { type: "geojson", data: empty });
+        map.addLayer({
+          id: "war-markers",
+          type: "symbol",
+          source: "warmarkers",
+          layout: { "icon-image": "war", "icon-size": 0.5, "icon-allow-overlap": true, "icon-ignore-placement": true },
+        });
+
+        // Player armies as unit-type icons.
         map.addSource("armies", { type: "geojson", data: empty });
         map.addLayer({
           id: "armies",
-          type: "circle",
+          type: "symbol",
           source: "armies",
-          paint: { "circle-radius": 3.5, "circle-color": "#34d399", "circle-stroke-color": "#04060a", "circle-stroke-width": 1 },
-        });
-
-        map.addSource("wars", { type: "geojson", data: empty });
-        map.addLayer({
-          id: "wars-glow",
-          type: "circle",
-          source: "wars",
-          paint: { "circle-radius": 10, "circle-color": "#ef4444", "circle-blur": 1, "circle-opacity": 0.5 },
+          layout: {
+            "icon-image": ["coalesce", ["get", "icon"], "UNIT"],
+            "icon-size": 0.5,
+            "icon-allow-overlap": true,
+            "icon-ignore-placement": true,
+          },
         });
 
         map.on("click", "country-core", (e) => {
@@ -348,14 +442,32 @@ export default function WorldMap() {
       (map.getSource("territories") as GeoJSONSource | undefined)?.setData(territoryPoints(snapshot));
       (map.getSource("trade") as GeoJSONSource | undefined)?.setData(tradeLines(snapshot));
       (map.getSource("armies") as GeoJSONSource | undefined)?.setData(armyPoints(snapshot));
-      (map.getSource("wars") as GeoJSONSource | undefined)?.setData(warPoints(snapshot));
+      (map.getSource("warmarkers") as GeoJSONSource | undefined)?.setData(combatantPoints(snapshot));
       if (map.getLayer("player-fill")) {
         map.setFilter("player-fill", ["in", ["get", "name"], ["literal", playerNames(snapshot.player.name)]]);
+      }
+      if (map.getLayer("enemy-fill")) {
+        const enemyNames = expandNames(snapshot.countries.filter((c) => c.atWar).map((c) => c.name));
+        map.setFilter("enemy-fill", ["in", ["get", "name"], ["literal", enemyNames]]);
       }
     };
     if (map.isStyleLoaded()) apply();
     else map.once("idle", apply);
   }, [snapshot]);
+
+  // Glow the selected country.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !snapshot) return;
+    const set = () => {
+      if (!map.getLayer("selected-glow")) return;
+      const country = snapshot.countries.find((c) => c.iso3 === selectedCountryIso);
+      const names = country ? expandNames([country.name]) : ["__none__"];
+      map.setFilter("selected-glow", ["in", ["get", "name"], ["literal", names]]);
+    };
+    if (map.isStyleLoaded()) set();
+    else map.once("idle", set);
+  }, [selectedCountryIso, snapshot]);
 
   return (
     <>

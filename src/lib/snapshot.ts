@@ -10,6 +10,8 @@ export interface CountryDot {
   gdp: number;
   isPlayer: boolean;
   isAlive: boolean;
+  atWar: boolean; // at war with the player
+  combatant: boolean; // involved in any active war
 }
 
 export interface BuildingView {
@@ -169,6 +171,22 @@ export async function getWorldSnapshot(gameId: string): Promise<WorldSnapshot | 
     prisma.researchProject.findMany({ where: { countryId: player.id } }),
   ]);
 
+  // War status for colouring the map: who's fighting, and who's fighting us.
+  const allWars = await prisma.war.findMany({
+    where: { gameId, status: "ACTIVE" },
+    include: { participants: { select: { countryId: true } } },
+  });
+  const combatantIds = new Set<string>();
+  const playerEnemyIds = new Set<string>();
+  for (const w of allWars) {
+    const ids = w.participants.map((p) => p.countryId);
+    const hasPlayer = ids.includes(player.id);
+    for (const id of ids) {
+      combatantIds.add(id);
+      if (hasPlayer && id !== player.id) playerEnemyIds.add(id);
+    }
+  }
+
   const takenTech = new Set(research.map((r) => r.techKey));
 
   // Player standing among living nations.
@@ -264,6 +282,8 @@ export async function getWorldSnapshot(gameId: string): Promise<WorldSnapshot | 
       gdp: c.gdp,
       isPlayer: c.isPlayer,
       isAlive: c.isAlive,
+      atWar: playerEnemyIds.has(c.id),
+      combatant: combatantIds.has(c.id),
     })),
     armies: armies.map((a) => ({
       id: a.id,

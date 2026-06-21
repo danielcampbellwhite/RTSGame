@@ -28,6 +28,20 @@ function eta(iso: string): string {
   return `${Math.max(1, Math.round(ms / 60_000))}m`;
 }
 
+// How much a sector contributes, derived from its buildings.
+const ECON_BUILDINGS = new Set(["FACTORY", "POWER_PLANT", "FARM", "PORT", "RAILWAY", "ROAD", "AIRPORT", "HOSPITAL", "HOUSING"]);
+const MIL_BUILDINGS = new Set(["BARRACKS", "AIR_BASE", "NAVAL_BASE", "MISSILE_SILO", "RADAR"]);
+
+function zoneOutput(buildings: { type: string; level: number }[]) {
+  let econ = 0;
+  let mil = 0;
+  for (const b of buildings) {
+    if (ECON_BUILDINGS.has(b.type)) econ += b.level * 2;
+    if (MIL_BUILDINGS.has(b.type)) mil += b.level * 3;
+  }
+  return { econ, mil };
+}
+
 type Tab = "policy" | "military" | "diplomacy" | "trade" | "research";
 
 // Shared hook: run a server action that returns a fresh snapshot, then store it.
@@ -388,6 +402,22 @@ function TerritoryPanel({ snapshot, territory }: { snapshot: WorldSnapshot; terr
       <Bar label="Unrest" value={territory.unrest.toFixed(0)} pct={territory.unrest} danger />
       <Bar label="Control" value={`${territory.controlPct.toFixed(0)}%`} pct={territory.controlPct} />
       {territory.occupied && <div className="text-xs text-[var(--wd-red)]">⚠ Under occupation</div>}
+
+      {(() => {
+        const o = zoneOutput(territory.buildings);
+        return (
+          <div className="grid grid-cols-2 gap-1 text-center text-[10px]">
+            <div className="rounded border border-[var(--wd-border)] py-1">
+              <div className="uppercase tracking-widest text-cyan-200/40">Economy</div>
+              <div className="neon-text text-[var(--wd-green)]">+{o.econ}</div>
+            </div>
+            <div className="rounded border border-[var(--wd-border)] py-1">
+              <div className="uppercase tracking-widest text-cyan-200/40">Military</div>
+              <div className="neon-text text-[var(--wd-red)]">+{o.mil}</div>
+            </div>
+          </div>
+        );
+      })()}
 
       {territory.buildings.length > 0 && (
         <Section label="Buildings">
