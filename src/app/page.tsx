@@ -31,30 +31,6 @@ export default function Page() {
   const [unread, setUnread] = useState(0);
   const [muted, setMuted] = useState(false);
   const lastTopEvent = useRef<string | null>(null);
-  // Drive the shell height from JS (innerHeight in px) so it never depends on
-  // dvh units or the `inset` shorthand, which some browsers don't support.
-  const [vh, setVh] = useState<number | null>(null);
-  const [vw, setVw] = useState<number | null>(null);
-  useEffect(() => {
-    // visualViewport reflects the truly visible area (excludes the browser's
-    // URL/toolbar), so the app is pinned exactly to the device frame.
-    const vv = typeof window !== "undefined" ? window.visualViewport : null;
-    const update = () => {
-      setVh(Math.round(vv?.height ?? window.innerHeight));
-      setVw(Math.round(vv?.width ?? window.innerWidth));
-    };
-    update();
-    window.addEventListener("resize", update);
-    window.addEventListener("orientationchange", update);
-    vv?.addEventListener("resize", update);
-    vv?.addEventListener("scroll", update);
-    return () => {
-      window.removeEventListener("resize", update);
-      window.removeEventListener("orientationchange", update);
-      vv?.removeEventListener("resize", update);
-      vv?.removeEventListener("scroll", update);
-    };
-  }, []);
 
   useEffect(() => {
     if (typeof window !== "undefined") setMuted(localStorage.getItem(MUTE_KEY) === "1");
@@ -180,26 +156,28 @@ export default function Page() {
       style={{
         position: "fixed",
         top: 0,
+        right: 0,
+        bottom: 0,
         left: 0,
-        width: vw ? `${vw}px` : "100%",
-        height: vh ? `${vh}px` : "100%",
+        width: "100vw",
+        maxWidth: "100vw",
         paddingTop: "calc(0.5rem + env(safe-area-inset-top))",
         paddingBottom: "calc(0.5rem + env(safe-area-inset-bottom))",
-        paddingLeft: "0.5rem",
-        paddingRight: "0.5rem",
+        paddingLeft: "calc(0.5rem + env(safe-area-inset-left))",
+        paddingRight: "calc(0.5rem + env(safe-area-inset-right))",
       }}
       className="grid grid-rows-[auto_1fr_auto] gap-2 overflow-hidden"
     >
       {showOnboarding && <Onboarding onClose={closeOnboarding} />}
 
-      <div className="flex shrink-0 gap-2">
+      <div className="flex min-w-0 shrink-0 gap-2 overflow-hidden">
         <TimeControl />
         <div className="min-w-0 flex-1">
           <ResourceBar />
         </div>
       </div>
 
-      <div className="relative min-h-0 md:grid md:grid-cols-[1fr_340px] md:grid-rows-[minmax(0,1fr)_7rem] md:gap-2">
+      <div className="relative min-h-0 min-w-0 md:grid md:grid-cols-[1fr_340px] md:grid-rows-[minmax(0,1fr)_7rem] md:gap-2">
         {/* Map — fills its grid row via absolute positioning (mobile) or the
             grid cell (desktop), so its height never depends on flex-grow. */}
         <div className="panel glow-border relative h-full w-full overflow-hidden md:col-start-1 md:row-start-1">
@@ -225,7 +203,7 @@ export default function Page() {
       </div>
 
       {/* Mobile-only tab bar */}
-      <div className="flex w-full max-w-full shrink-0 gap-1 md:hidden">
+      <div className="flex min-w-0 shrink-0 gap-1 md:hidden">
         {(["map", "info", "feed"] as const).map((t) => (
           <button
             key={t}
