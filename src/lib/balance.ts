@@ -88,3 +88,12 @@ export const DIPLOMACY = {
   improveStep: 12, // opinion gained per diplomatic action
   influenceCostImprove: 3,
 } as const;
+
+export const FOG = {
+  /** Vision radius (degrees) a controlled zone provides. */
+  zoneSight: 2.0,
+  /** Vision radius for a zone with a radar station. */
+  radarSight: 6.0,
+  /** Minimum vision a stationed army provides regardless of unit type. */
+  armyMinSight: 1.2,
+} as const;

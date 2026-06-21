@@ -542,7 +542,8 @@ function ForeignZonePanel({ snapshot, zone }: { snapshot: WorldSnapshot; zone: W
 
   return (
     <Shell title={zone.name} subtitle={zone.kind.replace(/_/g, " ")}>
-      <Bar label="Controlled by" value={owner?.name ?? zone.ownerIso} />
+      {!zone.visible && <div className="text-xs text-cyan-200/60">🌫 Out of vision — owner unknown. Scout with a unit nearby.</div>}
+      <Bar label="Controlled by" value={zone.visible ? owner?.name ?? zone.ownerIso : "Unknown"} />
       {home && home.iso3 !== zone.ownerIso && <Bar label="Homeland" value={home.name} />}
       <Bar label="Control" value={`${zone.controlPct.toFixed(0)}%`} pct={zone.controlPct} danger={isEnemy} />
 

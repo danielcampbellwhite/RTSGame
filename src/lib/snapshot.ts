@@ -1,6 +1,8 @@
 import { prisma } from "@/lib/db";
 import { catchUp } from "@/lib/sim/engine";
 import { TECH_TREE } from "@/data/tech";
+import { FOG } from "@/lib/balance";
+import { UNIT_STATS } from "@/lib/units";
 
 export interface CountryDot {
   iso3: string;
@@ -121,7 +123,9 @@ export interface WorldSnapshot {
   territories: TerritoryView[];
   countries: CountryDot[];
   // Every zone in the world with its current owner — drives the hex map colours.
-  allZones: { id: string; name: string; lng: number; lat: number; ownerIso: string; homeIso: string; kind: string; controlPct: number }[];
+  allZones: { id: string; name: string; lng: number; lat: number; ownerIso: string; homeIso: string; kind: string; controlPct: number; visible: boolean }[];
+  // Enemy units currently within your vision range.
+  enemyUnits: { lng: number; lat: number; type: string; ownerIso: string }[];
   armies: ArmyView[];
   relations: RelationView[];
   wars: WarView[];
@@ -190,6 +194,41 @@ export async function getWorldSnapshot(gameId: string): Promise<WorldSnapshot | 
   }
 
   const takenTech = new Set(research.map((r) => r.techKey));
+
+  // ── Fog of war: what can the player see? ──
+  const zonePos = new Map<string, [number, number]>();
+  for (const c of countries) for (const t of c.territories) zonePos.set(t.id, [t.lng, t.lat]);
+
+  // Vision sources: each controlled zone (radar extends it) + each army.
+  const sources: { x: number; y: number; r2: number }[] = [];
+  for (const t of playerTerritories) {
+    const radar = t.buildings.some((b) => b.type === "RADAR" && b.level >= 1);
+    const r = radar ? FOG.radarSight : FOG.zoneSight;
+    sources.push({ x: t.lng, y: t.lat, r2: r * r });
+  }
+  const allArmies = await prisma.army.findMany({
+    where: { country: { gameId } },
+    include: { units: true, country: { select: { iso3: true, isPlayer: true } } },
+  });
+  for (const a of allArmies) {
+    if (!a.country.isPlayer || !a.locationTerritoryId) continue;
+    const pos = zonePos.get(a.locationTerritoryId);
+    if (!pos) continue;
+    const sight = Math.max(FOG.armyMinSight, ...a.units.map((u) => UNIT_STATS[u.type].sight));
+    sources.push({ x: pos[0], y: pos[1], r2: sight * sight });
+  }
+  const seen = (x: number, y: number) =>
+    sources.some((s) => (s.x - x) * (s.x - x) + (s.y - y) * (s.y - y) <= s.r2);
+
+  // Enemy units within vision.
+  const enemyUnits: WorldSnapshot["enemyUnits"] = [];
+  for (const a of allArmies) {
+    if (a.country.isPlayer || !a.locationTerritoryId) continue;
+    const pos = zonePos.get(a.locationTerritoryId);
+    if (!pos || !seen(pos[0], pos[1])) continue;
+    const dominant = [...a.units].sort((x, y) => y.count - x.count)[0]?.type ?? "INFANTRY";
+    enemyUnits.push({ lng: pos[0], lat: pos[1], type: dominant, ownerIso: a.country.iso3 });
+  }
 
   // Player standing among living nations.
   const alive = countries.filter((c) => c.isAlive);
@@ -288,17 +327,22 @@ export async function getWorldSnapshot(gameId: string): Promise<WorldSnapshot | 
       combatant: combatantIds.has(c.id),
     })),
     allZones: countries.flatMap((c) =>
-      c.territories.map((t) => ({
-        id: t.id,
-        name: t.name,
-        lng: t.lng,
-        lat: t.lat,
-        ownerIso: c.iso3,
-        homeIso: t.originalOwner,
-        kind: t.kind,
-        controlPct: t.controlPct,
-      }))
+      c.territories.map((t) => {
+        const visible = c.id === player.id || seen(t.lng, t.lat);
+        return {
+          id: t.id,
+          name: t.name,
+          lng: t.lng,
+          lat: t.lat,
+          ownerIso: visible ? c.iso3 : "", // fogged: owner unknown
+          homeIso: t.originalOwner,
+          kind: t.kind,
+          controlPct: t.controlPct,
+          visible,
+        };
+      })
     ),
+    enemyUnits,
     armies: armies.map((a) => ({
       id: a.id,
       name: a.name,

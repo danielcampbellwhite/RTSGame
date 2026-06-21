@@ -69,6 +69,17 @@ function armyPoints(s: WorldSnapshot): GeoJSON.FeatureCollection {
   };
 }
 
+function enemyUnitPoints(s: WorldSnapshot): GeoJSON.FeatureCollection {
+  return {
+    type: "FeatureCollection",
+    features: s.enemyUnits.map((u) => ({
+      type: "Feature",
+      properties: { icon: UNIT_LETTER[u.type] ? `enemy-${u.type}` : "enemy-UNIT" },
+      geometry: { type: "Point", coordinates: [u.lng, u.lat] },
+    })),
+  };
+}
+
 function combatantPoints(s: WorldSnapshot): GeoJSON.FeatureCollection {
   return {
     type: "FeatureCollection",
@@ -306,12 +317,14 @@ export default function WorldMap() {
     }
 
     const owner = new Map(snap.allZones.map((z) => [z.id, z.ownerIso]));
+    const vis = new Map(snap.allZones.map((z) => [z.id, z.visible]));
     const enemy = new Set(snap.countries.filter((c) => c.atWar).map((c) => c.iso3));
     const playerIso = snap.player.iso3;
-    const features = regionsRef.current.map((f) => ({
-      ...f,
-      properties: { zoneId: f.properties!.zoneId, color: zoneColor(owner.get(f.properties!.zoneId as string), playerIso, enemy) },
-    }));
+    const features = regionsRef.current.map((f) => {
+      const id = f.properties!.zoneId as string;
+      const color = vis.get(id) ? zoneColor(owner.get(id), playerIso, enemy) : "#0a141f"; // fogged
+      return { ...f, properties: { zoneId: id, color } };
+    });
     src.setData({ type: "FeatureCollection", features });
   }, []);
 
@@ -405,8 +418,10 @@ export default function WorldMap() {
 
         for (const [type, letter] of Object.entries(UNIT_LETTER)) {
           if (!map.hasImage(type)) map.addImage(type, unitChip(letter, "#34d399"), { pixelRatio: 2 });
+          if (!map.hasImage(`enemy-${type}`)) map.addImage(`enemy-${type}`, unitChip(letter, "#ef4444"), { pixelRatio: 2 });
         }
         if (!map.hasImage("UNIT")) map.addImage("UNIT", unitChip("•", "#34d399"), { pixelRatio: 2 });
+        if (!map.hasImage("enemy-UNIT")) map.addImage("enemy-UNIT", unitChip("•", "#ef4444"), { pixelRatio: 2 });
         if (!map.hasImage("war")) map.addImage("war", warIcon(), { pixelRatio: 2 });
         for (const k of ZONE_KINDS) if (!map.hasImage(`zone-${k}`)) map.addImage(`zone-${k}`, zoneIcon(k), { pixelRatio: 2 });
 
@@ -449,6 +464,15 @@ export default function WorldMap() {
           type: "symbol",
           source: "armies",
           layout: { "icon-image": ["coalesce", ["get", "icon"], "UNIT"], "icon-size": 0.55, "icon-allow-overlap": true, "icon-ignore-placement": true },
+        });
+
+        // Spotted enemy units (red) — only those within your vision.
+        map.addSource("enemyunits", { type: "geojson", data: empty });
+        map.addLayer({
+          id: "enemyunits",
+          type: "symbol",
+          source: "enemyunits",
+          layout: { "icon-image": ["coalesce", ["get", "icon"], "enemy-UNIT"], "icon-size": 0.5, "icon-allow-overlap": true, "icon-ignore-placement": true },
         });
 
         fetch("/world.geojson")
@@ -506,6 +530,7 @@ export default function WorldMap() {
       (map.getSource("zones") as GeoJSONSource | undefined)?.setData(zonePoints(snapshot));
       (map.getSource("trade") as GeoJSONSource | undefined)?.setData(tradeLines(snapshot));
       (map.getSource("armies") as GeoJSONSource | undefined)?.setData(armyPoints(snapshot));
+      (map.getSource("enemyunits") as GeoJSONSource | undefined)?.setData(enemyUnitPoints(snapshot));
       (map.getSource("warmarkers") as GeoJSONSource | undefined)?.setData(combatantPoints(snapshot));
 
       const gl = glRef.current;
