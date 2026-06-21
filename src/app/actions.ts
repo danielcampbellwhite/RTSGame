@@ -4,8 +4,9 @@ import { prisma } from "@/lib/db";
 import { catchUp } from "@/lib/sim/engine";
 import { createGameWorld } from "@/lib/world";
 import { getWorldSnapshot, type WorldSnapshot } from "@/lib/snapshot";
-import { DIPLOMACY } from "@/lib/balance";
+import { DIPLOMACY, STRIKE } from "@/lib/balance";
 import { buildingCost, buildingDurationMs } from "@/lib/buildings";
+import { UNIT_STATS, maxRange, forceStrength } from "@/lib/units";
 import { recruit, orderMove, recruitAt } from "@/lib/sim/forces";
 import { startResearchProject } from "@/lib/sim/research";
 import { declareWar as declareWarCore, endWar, adjustOpinion, setFlags } from "@/lib/sim/diplomacy";
@@ -153,6 +154,49 @@ export async function recruitAtZone(gameId: string, territoryId: string, type: U
     return getWorldSnapshot(gameId);
   }
   await recruitAt(p.id, territoryId, type, count);
+  revalidatePath("/");
+  return getWorldSnapshot(gameId);
+}
+
+/** Ranged/air strike: damage a target zone's morale from afar if within range and off cooldown. */
+export async function strikeZone(gameId: string, armyId: string, targetZoneId: string) {
+  await catchUp(gameId);
+  const p = await player(gameId);
+  if (!p) return getWorldSnapshot(gameId);
+  const army = await prisma.army.findFirst({ where: { id: armyId, countryId: p.id }, include: { units: true } });
+  if (!army || !army.locationTerritoryId) return getWorldSnapshot(gameId);
+  if (army.strikeReadyAt && army.strikeReadyAt.getTime() > Date.now()) return getWorldSnapshot(gameId);
+
+  const [loc, target] = await Promise.all([
+    prisma.territory.findUnique({ where: { id: army.locationTerritoryId } }),
+    prisma.territory.findUnique({ where: { id: targetZoneId } }),
+  ]);
+  if (!loc || !target || target.countryId === p.id) return getWorldSnapshot(gameId);
+
+  const range = maxRange(army.units);
+  const dist = Math.hypot(target.lng - loc.lng, target.lat - loc.lat);
+  if (dist > range) {
+    await prisma.gameEvent.create({
+      data: { gameId, scope: "COUNTRY", category: "SYSTEM", title: `${target.name} is out of strike range`, countryIso: p.iso3, severity: 1 },
+    });
+    return getWorldSnapshot(gameId);
+  }
+
+  const dmg = forceStrength(army.units) * STRIKE.moraleFactor;
+  await prisma.territory.update({ where: { id: target.id }, data: { morale: Math.max(0, target.morale - dmg) } });
+  await prisma.army.update({ where: { id: army.id }, data: { strikeReadyAt: new Date(Date.now() + STRIKE.cooldownMs) } });
+  const air = army.units.some((u) => UNIT_STATS[u.type].air);
+  await prisma.gameEvent.create({
+    data: {
+      gameId,
+      scope: "REGIONAL",
+      category: "BATTLE",
+      title: `${air ? "Air strike" : "Bombardment"} on ${target.name}`,
+      body: `Morale −${dmg.toFixed(0)}.`,
+      countryIso: p.iso3,
+      severity: 2,
+    },
+  });
   revalidatePath("/");
   return getWorldSnapshot(gameId);
 }

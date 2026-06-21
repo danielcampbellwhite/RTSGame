@@ -14,10 +14,11 @@ import {
   createTradeRoute,
   cancelTradeRoute,
   startResearch,
+  strikeZone,
 } from "@/app/actions";
 import type { WorldSnapshot } from "@/lib/snapshot";
 import { buildingCost } from "@/lib/buildings";
-import { UNIT_STATS } from "@/lib/units";
+import { UNIT_STATS, maxRange } from "@/lib/units";
 import type { BuildingType, UnitType, TradeGood } from "@prisma/client";
 
 // Short "ready in" countdown for an ISO timestamp.
@@ -556,6 +557,31 @@ function ForeignZonePanel({ snapshot, zone }: { snapshot: WorldSnapshot; zone: W
           ))}
         </Section>
       )}
+
+      {(() => {
+        // Armies within attack range can strike this zone from afar.
+        const now = Date.now();
+        const inRange = snapshot.armies.filter((a) => {
+          const loc = a.locationTerritoryId && snapshot.allZones.find((z) => z.id === a.locationTerritoryId);
+          if (!loc) return false;
+          return Math.hypot(zone.lng - loc.lng, zone.lat - loc.lat) <= maxRange(a.units);
+        });
+        if (!inRange.length) return null;
+        return (
+          <Section label="Strike (ranged / air)">
+            {inRange.map((a) => {
+              const ready = !a.strikeReadyAt || new Date(a.strikeReadyAt).getTime() <= now;
+              const air = a.units.some((u) => UNIT_STATS[u.type as keyof typeof UNIT_STATS]?.air);
+              return (
+                <Btn key={a.id} small danger disabled={isPending || !ready} onClick={() => run(() => strikeZone(snapshot.gameId, a.id, zone.id))}>
+                  {air ? "✈ Air strike" : "💥 Bombard"} — {a.name}
+                  {ready ? "" : " (cooldown)"}
+                </Btn>
+              );
+            })}
+          </Section>
+        );
+      })()}
 
       <Btn
         small

@@ -235,6 +235,7 @@ model Army {
   strength Float @default(0)  // derived combat power
   morale   Float @default(70)
   supply   Float @default(100)
+  strikeReadyAt DateTime? // ranged/air strike cooldown
 
   units Unit[]
 

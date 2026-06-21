@@ -93,6 +93,13 @@ export const DIPLOMACY = {
   influenceCostImprove: 3,
 } as const;
 
+export const STRIKE = {
+  /** Cooldown before a force can strike again (ms). */
+  cooldownMs: 2 * 3_600_000,
+  /** Zone morale damage per point of striking force strength. */
+  moraleFactor: 0.35,
+} as const;
+
 export const FOG = {
   /** Vision radius (degrees) a controlled zone provides. */
   zoneSight: 2.0,

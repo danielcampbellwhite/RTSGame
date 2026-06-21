@@ -44,6 +44,7 @@ export interface ArmyView {
   strength: number;
   morale: number;
   locationTerritoryId: string | null;
+  strikeReadyAt: string | null;
   units: { type: string; count: number; health: number }[];
 }
 
@@ -350,6 +351,7 @@ export async function getWorldSnapshot(gameId: string): Promise<WorldSnapshot | 
       strength: a.strength,
       morale: a.morale,
       locationTerritoryId: a.locationTerritoryId,
+      strikeReadyAt: a.strikeReadyAt ? a.strikeReadyAt.toISOString() : null,
       units: a.units.map((u) => ({ type: u.type, count: u.count, health: u.health })),
     })),
     relations: relations.map((r) => ({
