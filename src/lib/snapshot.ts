@@ -135,7 +135,7 @@ export interface WorldSnapshot {
   territories: TerritoryView[];
   countries: CountryDot[];
   // Every zone in the world with its current owner — drives the hex map colours.
-  allZones: { id: string; name: string; lng: number; lat: number; ownerIso: string; homeIso: string; kind: string; controlPct: number; visible: boolean }[];
+  allZones: { id: string; name: string; lng: number; lat: number; ownerIso: string; homeIso: string; kind: string; controlPct: number; visible: boolean; contested: boolean }[];
   // Enemy units currently within your vision range.
   enemyUnits: { lng: number; lat: number; type: string; ownerIso: string }[];
   armies: ArmyView[];
@@ -242,6 +242,16 @@ export async function getWorldSnapshot(gameId: string): Promise<WorldSnapshot | 
     if (!pos || !seen(pos[0], pos[1])) continue;
     const dominant = [...a.units].sort((x, y) => y.count - x.count)[0]?.type ?? "INFANTRY";
     enemyUnits.push({ lng: pos[0], lat: pos[1], type: dominant, ownerIso: a.country.iso3 });
+  }
+
+  // Contested zones: an engaged army of another country is assaulting them.
+  const ownerByZone = new Map<string, string>();
+  for (const c of countries) for (const t of c.territories) ownerByZone.set(t.id, c.id);
+  const contestedIds = new Set<string>();
+  for (const a of allArmies) {
+    if (a.state !== "ENGAGED" || !a.locationTerritoryId) continue;
+    const owner = ownerByZone.get(a.locationTerritoryId);
+    if (owner && owner !== a.countryId) contestedIds.add(a.locationTerritoryId);
   }
 
   // Player standing among living nations.
@@ -353,6 +363,7 @@ export async function getWorldSnapshot(gameId: string): Promise<WorldSnapshot | 
           kind: t.kind,
           controlPct: t.controlPct,
           visible,
+          contested: visible && contestedIds.has(t.id),
         };
       })
     ),

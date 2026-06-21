@@ -80,6 +80,15 @@ function enemyUnitPoints(s: WorldSnapshot): GeoJSON.FeatureCollection {
   };
 }
 
+function battlePoints(s: WorldSnapshot): GeoJSON.FeatureCollection {
+  return {
+    type: "FeatureCollection",
+    features: s.allZones
+      .filter((z) => z.contested)
+      .map((z) => ({ type: "Feature", properties: {}, geometry: { type: "Point", coordinates: [z.lng, z.lat] } })),
+  };
+}
+
 function fleetPoints(s: WorldSnapshot): GeoJSON.FeatureCollection {
   return {
     type: "FeatureCollection",
@@ -266,9 +275,10 @@ function overviewHTML(
       `<div class="wd-ov-row"><span>Control</span><span>${zone.controlPct.toFixed(0)}%</span></div>` +
       (zone.visible ? "" : `<div class="wd-ov-hint">🌫 Out of vision</div>`);
   }
+  const battle = zone.contested ? `<div class="wd-ov-hint" style="color:#f59e0b">⚔ Battle in progress</div>` : "";
   return `<div class="wd-ov-title">${zone.name}</div>
     <div class="wd-ov-sub">${zone.kind.replace(/_/g, " ").toLowerCase()} · ${ownerName}</div>
-    ${body}
+    ${battle}${body}
     <div class="wd-ov-hint">tap again to manage →</div>`;
 }
 
@@ -361,6 +371,7 @@ export default function WorldMap() {
   const popupRef = useRef<Popup | null>(null);
   const overviewRef = useRef<Popup | null>(null);
   const roRef = useRef<ResizeObserver | null>(null);
+  const battleAnimRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const nameToIso = useRef<Map<string, string>>(new Map());
   const toRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const glRef = useRef<{ Marker: new (opts?: MarkerOptions) => Marker } | null>(null);
@@ -564,6 +575,24 @@ export default function WorldMap() {
           layout: { "icon-image": ["coalesce", ["get", "icon"], "UNIT"], "icon-size": 0.55, "icon-allow-overlap": true, "icon-ignore-placement": true },
         });
 
+        // Pulsing markers on zones under active assault.
+        map.addSource("battles", { type: "geojson", data: empty });
+        map.addLayer({
+          id: "battle-pulse",
+          type: "circle",
+          source: "battles",
+          paint: { "circle-color": "#f59e0b", "circle-blur": 0.5, "circle-radius": 9, "circle-opacity": 0.6, "circle-stroke-color": "#fdba74", "circle-stroke-width": 1 },
+        });
+        if (battleAnimRef.current) clearInterval(battleAnimRef.current);
+        let phase = 0;
+        battleAnimRef.current = setInterval(() => {
+          const mp = mapRef.current;
+          if (!mp || !mp.getLayer("battle-pulse")) return;
+          phase += 0.18;
+          mp.setPaintProperty("battle-pulse", "circle-radius", 9 + Math.sin(phase) * 5);
+          mp.setPaintProperty("battle-pulse", "circle-opacity", 0.45 + (Math.sin(phase) + 1) * 0.2);
+        }, 120);
+
         // Player fleets.
         map.addSource("fleets", { type: "geojson", data: empty });
         map.addLayer({ id: "fleets", type: "symbol", source: "fleets", layout: { "icon-image": "ship", "icon-size": 0.55, "icon-allow-overlap": true, "icon-ignore-placement": true } });
@@ -605,6 +634,7 @@ export default function WorldMap() {
     return () => {
       cancelled = true;
       if (toRef.current) clearTimeout(toRef.current);
+      if (battleAnimRef.current) clearInterval(battleAnimRef.current);
       roRef.current?.disconnect();
       roRef.current = null;
       for (const mk of labelsRef.current) mk.remove();
@@ -635,6 +665,7 @@ export default function WorldMap() {
       (map.getSource("trade") as GeoJSONSource | undefined)?.setData(tradeLines(snapshot));
       (map.getSource("armies") as GeoJSONSource | undefined)?.setData(armyPoints(snapshot));
       (map.getSource("fleets") as GeoJSONSource | undefined)?.setData(fleetPoints(snapshot));
+      (map.getSource("battles") as GeoJSONSource | undefined)?.setData(battlePoints(snapshot));
       (map.getSource("enemyunits") as GeoJSONSource | undefined)?.setData(enemyUnitPoints(snapshot));
       (map.getSource("warmarkers") as GeoJSONSource | undefined)?.setData(combatantPoints(snapshot));
 
