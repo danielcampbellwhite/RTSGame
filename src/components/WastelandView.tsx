@@ -3,14 +3,13 @@
 import { useEffect, useRef, useState } from "react";
 import { useGame } from "@/store/game";
 import { Btn, Meter, useAction } from "@/components/ui";
-import { move, resolveEncounter, returnHome, useConsumable } from "@/app/actions";
+import { move, resolveEncounter, returnHome, useConsumable, interact, type Dir } from "@/app/actions";
 import type { GameSnapshot } from "@/lib/types";
 
 export default function WastelandView() {
   const snap = useGame((s) => s.snapshot)!;
   const { run, isPending } = useAction();
   const { player, expedition: exp } = snap;
-  const [term, setTerm] = useState<string[]>(["> type 'help' for commands"]);
   if (!exp) return null;
 
   const cols = exp.windowRadius * 2 + 1;
@@ -23,9 +22,7 @@ export default function WastelandView() {
       <div className="panel rounded p-2">
         <div className="flex items-center justify-between text-[10px]">
           <span className="title text-[var(--rust)]">WASTELAND</span>
-          <span className="text-[var(--ink-dim)]">
-            {exp.biomeName} · {exp.distance} out · Tier {exp.tier}
-          </span>
+          <span className="text-[var(--ink-dim)]">{exp.biomeName} · {exp.distance} out · Tier {exp.tier}</span>
         </div>
         <div className="mt-2 grid grid-cols-3 gap-2">
           <Meter label="Health" value={player.health} max={player.maxHealth} color="#b13838" />
@@ -34,12 +31,9 @@ export default function WastelandView() {
         </div>
       </div>
 
-      {/* Map window with environmental backdrop */}
-      <div className="wasteland-bg panel relative flex-1 overflow-hidden rounded p-3" style={{ ["--biome" as string]: exp.biomeColor }}>
-        <div
-          className="relative mx-auto grid h-full w-full max-w-[440px] gap-[3px]"
-          style={{ gridTemplateColumns: `repeat(${cols}, 1fr)` }}
-        >
+      {/* Map with environmental backdrop */}
+      <div className="wasteland-bg panel relative overflow-hidden rounded p-3" style={{ ["--biome" as string]: exp.biomeColor, height: "32%" }}>
+        <div className="relative mx-auto grid h-full w-full max-w-[420px] gap-[3px]" style={{ gridTemplateColumns: `repeat(${cols}, 1fr)` }}>
           {exp.tiles.map((t) => {
             let bg = "transparent";
             let border = "1px solid rgba(255,255,255,0.04)";
@@ -53,9 +47,9 @@ export default function WastelandView() {
               content = t.feature === "EMPTY" ? "" : t.icon ?? "";
               if (t.isExit) border = "1px solid var(--tox)";
             } else if (t.scouted) {
-              bg = mix(t.color ?? "#2a241d", 0.18);
+              bg = mix(t.color ?? "#2a241d", 0.16);
               border = "1px dashed rgba(255,255,255,0.12)";
-              content = "·"; // terrain visible, contents unknown
+              content = "·";
             }
             return (
               <div
@@ -71,7 +65,7 @@ export default function WastelandView() {
         </div>
       </div>
 
-      {/* Encounter card (when something blocks the tile) */}
+      {/* Encounter card */}
       {exp.pending && (
         <div className="panel rounded p-2" style={{ borderColor: "var(--blood)" }}>
           <div className="flex items-center justify-between">
@@ -90,22 +84,24 @@ export default function WastelandView() {
         </div>
       )}
 
-      {/* Controls: d-pad + pack + terminal */}
+      {/* Controls */}
       <div className="flex items-stretch gap-2">
-        <div className="grid grid-cols-3 grid-rows-3 gap-1" style={{ width: 124 }}>
-          <span />
+        {/* 8-way compass */}
+        <div className="grid grid-cols-3 grid-rows-3 gap-1" style={{ width: 132 }}>
+          <Btn disabled={blocked} onClick={() => run(() => move(player.id, "NW"))}>↖</Btn>
           <Btn disabled={blocked} onClick={() => run(() => move(player.id, "N"))}>↑</Btn>
-          <span />
+          <Btn disabled={blocked} onClick={() => run(() => move(player.id, "NE"))}>↗</Btn>
           <Btn disabled={blocked} onClick={() => run(() => move(player.id, "W"))}>←</Btn>
           <div className="flex items-center justify-center text-[9px] text-[var(--ink-dim)]">{player.stamina}⚡</div>
           <Btn disabled={blocked} onClick={() => run(() => move(player.id, "E"))}>→</Btn>
-          <span />
+          <Btn disabled={blocked} onClick={() => run(() => move(player.id, "SW"))}>↙</Btn>
           <Btn disabled={blocked} onClick={() => run(() => move(player.id, "S"))}>↓</Btn>
-          <span />
+          <Btn disabled={blocked} onClick={() => run(() => move(player.id, "SE"))}>↘</Btn>
         </div>
 
+        {/* Pack + actions */}
         <div className="flex flex-1 flex-col gap-1">
-          <div className="inset flex-1 overflow-y-auto scroll-thin rounded p-1 text-[10px]">
+          <div className="inset flex-1 overflow-y-auto scroll-thin rounded p-1 text-[10px]" style={{ maxHeight: 80 }}>
             <div className="flex items-center justify-between text-[var(--ink-dim)]">
               <span className="title">Pack {exp.backpackUsed}/{exp.carryCap}</span>
               <span>🧨 {ammo}</span>
@@ -120,18 +116,22 @@ export default function WastelandView() {
               </div>
             ))}
           </div>
-          <Btn variant="go" disabled={isPending || !!exp.pending} onClick={() => run(() => returnHome(player.id))} className="py-2">
-            ⌂ Return Home {exp.distance > 0 ? `(risky: ${exp.distance} out)` : ""}
+          <div className="grid grid-cols-3 gap-1">
+            <Btn disabled={blocked} onClick={() => run(() => interact(player.id, "look"))}>Look</Btn>
+            <Btn disabled={blocked} onClick={() => run(() => interact(player.id, "search"))}>Search</Btn>
+            <Btn disabled={blocked} onClick={() => run(() => interact(player.id, "rest"))}>Rest</Btn>
+          </div>
+          <Btn variant="go" disabled={isPending || !!exp.pending} onClick={() => run(() => returnHome(player.id))} className="py-1.5">
+            ⌂ Return {exp.distance > 0 ? `(${exp.distance} out)` : ""}
           </Btn>
         </div>
       </div>
 
-      <Terminal snap={snap} lines={term} setLines={setTerm} run={run} disabled={isPending} />
+      <Terminal snap={snap} run={run} disabled={isPending} />
     </div>
   );
 }
 
-/** Darken/alpha a hex color toward the background. */
 function mix(hex: string, alpha: number): string {
   const h = hex.replace("#", "");
   const r = parseInt(h.slice(0, 2), 16);
@@ -142,80 +142,77 @@ function mix(hex: string, alpha: number): string {
 
 // ── Terminal ──────────────────────────────────────────────────────────────────
 
-function Terminal({
-  snap, lines, setLines, run, disabled,
-}: {
-  snap: GameSnapshot;
-  lines: string[];
-  setLines: (f: (prev: string[]) => string[]) => void;
-  run: (fn: () => Promise<GameSnapshot | null>) => void;
-  disabled: boolean;
-}) {
+const MOVE_WORDS: Record<string, Dir> = {
+  n: "N", north: "N", s: "S", south: "S", e: "E", east: "E", w: "W", west: "W",
+  ne: "NE", northeast: "NE", nw: "NW", northwest: "NW",
+  se: "SE", southeast: "SE", sw: "SW", southwest: "SW",
+};
+
+function Terminal({ snap, run, disabled }: { snap: GameSnapshot; run: (fn: () => Promise<GameSnapshot | null>) => void; disabled: boolean }) {
   const [cmd, setCmd] = useState("");
+  const [note, setNote] = useState("type 'help' for commands");
   const ref = useRef<HTMLDivElement>(null);
   const { player, expedition: exp } = snap;
 
+  // Auto-scroll to newest (bottom).
   useEffect(() => {
     if (ref.current) ref.current.scrollTop = ref.current.scrollHeight;
-  }, [lines]);
-
-  const echo = (s: string) => setLines((p) => [...p.slice(-30), s]);
+  }, [snap]);
 
   const submit = () => {
     const raw = cmd.trim().toLowerCase();
     if (!raw || !exp) return;
     setCmd("");
-    echo(`> ${raw}`);
     const [verb, ...rest] = raw.split(/\s+/);
     const arg = rest.join(" ");
+    setNote("");
 
-    const moveMap: Record<string, "N" | "S" | "E" | "W"> = {
-      n: "N", north: "N", up: "N",
-      s: "S", south: "S", down: "S",
-      e: "E", east: "E", right: "E",
-      w: "W", west: "W", left: "W",
-    };
-
-    if (moveMap[verb] || (verb === "go" && moveMap[arg])) {
-      if (exp.pending) return echo("Something blocks your path — fight or flee.");
-      run(() => move(player.id, moveMap[verb] ?? moveMap[arg]));
+    if (MOVE_WORDS[verb] || (verb === "go" && MOVE_WORDS[arg])) {
+      if (exp.pending) return setNote("Something blocks your path — fight or flee.");
+      run(() => move(player.id, MOVE_WORDS[verb] ?? MOVE_WORDS[arg]));
     } else if (["f", "fight", "attack"].includes(verb)) {
-      if (!exp.pending) return echo("Nothing to fight here.");
+      if (!exp.pending) return setNote("Nothing to fight here.");
       run(() => resolveEncounter(player.id, "fight"));
     } else if (["flee", "run", "escape"].includes(verb)) {
-      if (!exp.pending) return echo("Nothing to flee from.");
+      if (!exp.pending) return setNote("Nothing to flee from.");
       run(() => resolveEncounter(player.id, "flee"));
     } else if (["r", "return", "home", "leave"].includes(verb)) {
-      if (exp.pending) return echo("Can't leave mid-fight.");
+      if (exp.pending) return setNote("Can't leave mid-fight.");
       run(() => returnHome(player.id));
+    } else if (["look", "l", "examine", "scan"].includes(verb)) {
+      run(() => interact(player.id, "look"));
+    } else if (verb === "search") {
+      if (exp.pending) return setNote("Deal with the threat first.");
+      run(() => interact(player.id, "search"));
+    } else if (verb === "rest") {
+      if (exp.pending) return setNote("Can't rest with a threat present.");
+      run(() => interact(player.id, "rest"));
     } else if (["use", "heal"].includes(verb)) {
       const want = verb === "heal" ? "" : arg;
-      const item = exp.backpack.find(
-        (b) => b.category === "CONSUMABLE" && (want ? b.name.toLowerCase().includes(want) : true)
-      );
-      if (!item) return echo("No matching consumable in your pack.");
+      const item = exp.backpack.find((b) => b.category === "CONSUMABLE" && (want ? b.name.toLowerCase().includes(want) : true));
+      if (!item) return setNote("No matching consumable in your pack.");
       run(() => useConsumable(player.id, item.id));
-    } else if (verb === "look" || verb === "scan") {
-      echo(`You are in ${exp.biomeName}, ${exp.distance} tiles out (tier ${exp.tier}).`);
-      if (exp.log[0]) echo(exp.log[0]);
     } else if (verb === "help") {
-      echo("commands: n/s/e/w · fight · flee · use [name] · return · look · help");
+      setNote("move: n s e w ne nw se sw · fight · flee · search · rest · look · use [item] · return");
     } else {
-      echo(`Unknown command: ${verb}`);
+      setNote(`Unknown command: ${verb}`);
     }
   };
 
+  // Server log is stored newest-first; show oldest→newest so it reads like a feed.
+  const feed = [...exp!.log].reverse();
+
   return (
-    <div className="panel rounded p-2">
-      <div ref={ref} className="mb-1 h-16 overflow-y-auto scroll-thin text-[10px] leading-snug text-[var(--tox)]">
-        {exp?.log.slice(0, 3).map((l, i) => (
-          <div key={`log${i}`} className="text-[var(--ink-dim)]">{l}</div>
-        ))}
-        {lines.map((l, i) => (
-          <div key={i} className={l.startsWith(">") ? "text-[var(--ink)]" : "text-[var(--tox)]"}>{l}</div>
+    <div className="panel flex-1 rounded p-2">
+      <div ref={ref} className="h-full min-h-[90px] overflow-y-auto scroll-thin pr-1 text-[11px] leading-relaxed">
+        {feed.map((l, i) => (
+          <div key={i} className="text-[var(--ink)]">
+            <span className="text-[var(--ink-dim)]">› </span>{l}
+          </div>
         ))}
       </div>
-      <div className="flex items-center gap-1">
+      <div className="mt-1 text-[9px] text-[var(--amber)]">{note}</div>
+      <div className="mt-1 flex items-center gap-1">
         <span className="text-[var(--tox)]">❯</span>
         <input
           value={cmd}

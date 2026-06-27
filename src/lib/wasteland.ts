@@ -139,11 +139,8 @@ export interface EnemyInstance {
   fleeable: number;
 }
 
-/** Build a scaled enemy for a tile (power/damage grow with tier). */
-export function enemyForTile(tile: Tile): EnemyInstance | null {
-  if (tile.feature !== "ENEMY" || !tile.enemyKey) return null;
-  const def = ENEMIES[tile.enemyKey];
-  const scale = 1 + (tile.tier - 1) * 0.35;
+function scaleEnemy(def: { key: string; name: string; icon: string; power: number; hpHit: number; fleeable: number }, tier: number): EnemyInstance {
+  const scale = 1 + (tier - 1) * 0.35;
   return {
     key: def.key,
     name: def.name,
@@ -152,4 +149,16 @@ export function enemyForTile(tile: Tile): EnemyInstance | null {
     hpHit: Math.round(def.hpHit * scale),
     fleeable: def.fleeable,
   };
+}
+
+/** Build a scaled enemy for a tile (power/damage grow with tier). */
+export function enemyForTile(tile: Tile): EnemyInstance | null {
+  if (tile.feature !== "ENEMY" || !tile.enemyKey) return null;
+  return scaleEnemy(ENEMIES[tile.enemyKey], tile.tier);
+}
+
+/** A wandering enemy that can ambush during a search/rest. */
+export function wanderingEnemy(rng: Rng, tier: number): EnemyInstance {
+  const candidates = ENEMY_KEYS.filter((k) => ENEMIES[k].minTier <= tier);
+  return scaleEnemy(ENEMIES[pick(rng, candidates)], tier);
 }

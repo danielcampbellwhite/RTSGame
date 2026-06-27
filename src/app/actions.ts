@@ -15,8 +15,9 @@ import {
   type PlayerCombat,
 } from "@/lib/game";
 import { mulberry32, hashSeed, randInt, chance } from "@/lib/rng";
-import { tileAt, lootForTile, enemyForTile, chebyshev, tierForDistance } from "@/lib/wasteland";
+import { tileAt, lootForTile, enemyForTile, wanderingEnemy, generateLoot, chebyshev, tierForDistance } from "@/lib/wasteland";
 import { BIOMES } from "@/data/world";
+import { sightFor, ambientLine, enemyEntrance, hazardLine, searchNothing } from "@/data/flavor";
 import type {
   GameSnapshot,
   ItemView,
@@ -193,7 +194,7 @@ async function loadSnapshot(playerId: string, flash: string | null = null): Prom
         windowRadius: WINDOW_RADIUS,
         biomeColor: BIOMES[cur.biome].color,
         biomeName: BIOMES[cur.biome].name,
-        log: ((exp.log as unknown as string[]) ?? []).slice(0, 8),
+        log: ((exp.log as unknown as string[]) ?? []).slice(0, 16),
         backpack: backpack.map(itemView),
         backpackUsed: backpack.reduce((n, b) => n + b.quantity, 0),
         carryCap: BASE_CARRY + carryBonus,
@@ -368,9 +369,17 @@ export async function startExpedition(playerId: string): Promise<GameSnapshot | 
   return loadSnapshot(playerId);
 }
 
-const DIRS: Record<string, [number, number]> = { N: [0, -1], S: [0, 1], E: [1, 0], W: [-1, 0] };
+export type Dir = "N" | "S" | "E" | "W" | "NE" | "NW" | "SE" | "SW";
+const DIRS: Record<Dir, [number, number]> = {
+  N: [0, -1], S: [0, 1], E: [1, 0], W: [-1, 0],
+  NE: [1, -1], NW: [-1, -1], SE: [1, 1], SW: [-1, 1],
+};
+const DIR_NAME: Record<Dir, string> = {
+  N: "north", S: "south", E: "east", W: "west",
+  NE: "north-east", NW: "north-west", SE: "south-east", SW: "south-west",
+};
 
-export async function move(playerId: string, dir: "N" | "S" | "E" | "W"): Promise<GameSnapshot | null> {
+export async function move(playerId: string, dir: Dir): Promise<GameSnapshot | null> {
   const player = await prisma.player.findUnique({ where: { id: playerId } });
   if (!player || player.state !== "IN_EXPEDITION") return loadSnapshot(playerId);
   const exp = await prisma.expedition.findFirst({ where: { playerId, status: "ACTIVE" } });
@@ -385,41 +394,49 @@ export async function move(playerId: string, dir: "N" | "S" | "E" | "W"): Promis
   const visited = new Set((exp.visited as unknown as string[]) ?? []);
   const firstVisit = !visited.has(key);
   visited.add(key);
-  const log = ((exp.log as unknown as string[]) ?? []).slice(0, 12);
+  let log = ((exp.log as unknown as string[]) ?? []).slice(0, 18);
+  const narr = mulberry32(hashSeed(exp.seed, x, y, 555));
 
   let health = player.health;
   let radiation = player.radiation;
-  let stamina = clamp(player.stamina - SURV.moveStaminaCost + SURV.staminaRegenOnTile, 0, 100);
+  const stamina = clamp(player.stamina - SURV.moveStaminaCost + SURV.staminaRegenOnTile, 0, 100);
   let pending: EncounterView | null = null;
+  const entry: string[] = []; // chronological lines for this step
 
   const tile = tileAt(exp.seed, x, y);
 
   if (x === 0 && y === 0) {
-    log.unshift("Back at the shelter exit. Return to safety anytime.");
-  } else if (firstVisit && tile.feature === "ENEMY") {
-    const e = enemyForTile(tile)!;
-    pending = { kind: "enemy", enemyKey: e.key, name: e.name, icon: e.icon, power: e.power, hp: e.power, maxHp: e.power };
-    log.unshift(`${e.icon} A ${e.name} blocks your path!`);
-  } else if (firstVisit && (tile.feature === "LOOT" || tile.feature === "CACHE")) {
-    const drops = lootForTile(exp.seed, tile);
-    const added = await addLootToBackpack(playerId, drops);
-    log.unshift(`${tile.icon} ${tile.label}: ${added || "nothing useful"}.`);
-  } else if (firstVisit && tile.feature === "HAZARD") {
-    const dose = randInt(mulberry32(hashSeed(exp.seed, x, y, 99)), SURV.radPerHazard[0], SURV.radPerHazard[1]) * (tile.hazard === "RADIATION" ? 1 : 0.6);
-    radiation = clamp(radiation + dose);
-    log.unshift(`${tile.icon} ${tile.label}! Radiation +${Math.round(dose)}.`);
+    entry.push("You stagger back to the shelter exit — safety is a breath away.");
   } else {
-    log.unshift(`${tile.icon} ${tile.label}.`);
+    entry.push(`You head ${DIR_NAME[dir]}. ${sightFor(narr, tile.biome)}`);
+    if (chance(narr, 0.22)) entry.push(ambientLine(narr));
+    if (firstVisit && tile.feature === "ENEMY") {
+      const e = enemyForTile(tile)!;
+      pending = { kind: "enemy", enemyKey: e.key, name: e.name, icon: e.icon, power: e.power, hp: e.power, maxHp: e.power };
+      entry.push(`${e.icon} ${enemyEntrance(narr, e.name)}`);
+    } else if (firstVisit && (tile.feature === "LOOT" || tile.feature === "CACHE")) {
+      const drops = lootForTile(exp.seed, tile);
+      const added = await addLootToBackpack(playerId, drops);
+      entry.push(added ? `${tile.icon} You scavenge the ${tile.label}. Recovered: ${added}.` : `${tile.icon} The ${tile.label} has already been stripped bare.`);
+    } else if (firstVisit && tile.feature === "HAZARD") {
+      const dose = Math.round(randInt(narr, SURV.radPerHazard[0], SURV.radPerHazard[1]) * (tile.hazard === "RADIATION" ? 1 : 0.6));
+      radiation = clamp(radiation + dose);
+      entry.push(`${tile.icon} ${hazardLine(narr, tile.hazard!)} (+${dose} rad)`);
+    } else if (!firstVisit) {
+      entry.push("Your own tracks cross this ground. Nothing new stirs.");
+    }
   }
 
-  // Standing radiation chips away at health past the threshold.
   if (radiation > SURV.radDamageThreshold) {
     const chip = Math.round((radiation - SURV.radDamageThreshold) / 8);
     if (chip > 0) {
       health = Math.max(0, health - chip);
-      log.unshift(`Radiation sickness: −${chip} HP.`);
+      entry.push(`☢ Radiation sickness gnaws at you (−${chip} HP).`);
     }
   }
+
+  for (const line of entry) log.unshift(line);
+  log = log.slice(0, 24);
 
   if (health <= 0) {
     return applyDeath(playerId, exp.id, "You succumbed to the wasteland.");
@@ -430,6 +447,58 @@ export async function move(playerId: string, dir: "N" | "S" | "E" | "W"): Promis
     data: { posX: x, posY: y, distance: Math.max(exp.distance, chebyshev(x, y)), visited: [...visited], log, pending: pending ? (pending as unknown as Prisma.InputJsonValue) : Prisma.DbNull },
   });
   await prisma.player.update({ where: { id: playerId }, data: { health, radiation, stamina } });
+  revalidatePath("/");
+  return loadSnapshot(playerId);
+}
+
+/** Non-movement interactions that make a tile feel alive: look around, search
+ *  it thoroughly (loot or ambush), or rest to recover stamina (with risk). */
+export async function interact(playerId: string, kind: "look" | "search" | "rest"): Promise<GameSnapshot | null> {
+  const player = await prisma.player.findUnique({ where: { id: playerId } });
+  if (!player || player.state !== "IN_EXPEDITION") return loadSnapshot(playerId);
+  const exp = await prisma.expedition.findFirst({ where: { playerId, status: "ACTIVE" } });
+  if (!exp) return loadSnapshot(playerId);
+  if (exp.pending) return loadSnapshot(playerId, "Deal with the threat first.");
+
+  const tile = tileAt(exp.seed, exp.posX, exp.posY);
+  const tier = tierForDistance(chebyshev(exp.posX, exp.posY));
+  const salt = kind === "search" ? 222 : kind === "rest" ? 333 : 111;
+  const narr = mulberry32(hashSeed(exp.seed, exp.posX, exp.posY, salt, Math.floor(Math.random() * 1e9)));
+  let log = ((exp.log as unknown as string[]) ?? []).slice(0, 18);
+  let stamina = player.stamina;
+  let pending: EncounterView | null = null;
+
+  if (kind === "look") {
+    log.unshift(`Exits lie in every direction. You could move on, search the area, or rest.`);
+    log.unshift(`${tile.icon} ${tile.label}. ${sightFor(narr, tile.biome)}`);
+  } else if (kind === "rest") {
+    stamina = clamp(stamina + 30);
+    log.unshift("You find cover, slow your breathing, and recover. (+stamina)");
+    if (chance(narr, 0.15 + tier * 0.05)) {
+      const e = wanderingEnemy(narr, tier);
+      pending = { kind: "enemy", enemyKey: e.key, name: e.name, icon: e.icon, power: e.power, hp: e.power, maxHp: e.power };
+      log.unshift(`${e.icon} Your rest is cut short — ${enemyEntrance(narr, e.name)}`);
+    }
+  } else {
+    // search
+    stamina = clamp(stamina - 5);
+    const roll = narr();
+    if (roll < 0.18 + tier * 0.03) {
+      const e = wanderingEnemy(narr, tier);
+      pending = { kind: "enemy", enemyKey: e.key, name: e.name, icon: e.icon, power: e.power, hp: e.power, maxHp: e.power };
+      log.unshift(`${e.icon} You disturbed something — ${enemyEntrance(narr, e.name)}`);
+    } else if (roll < 0.7) {
+      const drops = generateLoot(narr, [["scrap", 4], ["cloth", 3], ["ration", 3], ["water_bottle", 3], ["ammo", 2]], tier, [1, 1]);
+      const added = await addLootToBackpack(playerId, drops);
+      log.unshift(added ? `You comb through the debris and turn up ${added}.` : searchNothing(narr));
+    } else {
+      log.unshift(searchNothing(narr));
+    }
+  }
+
+  log = log.slice(0, 24);
+  await prisma.expedition.update({ where: { id: exp.id }, data: { log, pending: pending ? (pending as unknown as Prisma.InputJsonValue) : Prisma.DbNull } });
+  if (stamina !== player.stamina) await prisma.player.update({ where: { id: playerId }, data: { stamina } });
   revalidatePath("/");
   return loadSnapshot(playerId);
 }
