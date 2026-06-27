@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useGame } from "@/store/game";
 import { Btn, Meter, useAction } from "@/components/ui";
-import { move, resolveEncounter, returnHome, useConsumable, interact, recruitSurvivor, trade, helpInjured, type Dir } from "@/app/actions";
+import { move, resolveEncounter, returnHome, useConsumable, interact, recruitSurvivor, trade, helpInjured, takeGroundItem, takeAllGround, dropItem, type Dir } from "@/app/actions";
 import type { GameSnapshot } from "@/lib/types";
 
 export default function WastelandView() {
@@ -156,6 +156,24 @@ export default function WastelandView() {
         </div>
       )}
 
+      {/* Ground — items lying on your current tile */}
+      {exp.ground.length > 0 && (
+        <div className="panel rounded p-2">
+          <div className="mb-1 flex items-center justify-between text-[10px] text-[var(--ink-dim)]">
+            <span className="title">🔻 On the ground</span>
+            <Btn disabled={blocked} onClick={() => run(() => takeAllGround(player.id))}>Take all</Btn>
+          </div>
+          <div className="max-h-20 overflow-y-auto scroll-thin">
+            {exp.ground.map((g) => (
+              <div key={g.idx} className="flex items-center justify-between py-0.5 text-[11px]">
+                <span className="truncate">{g.icon} {g.name}{g.quantity > 1 ? ` ×${g.quantity}` : ""}{g.durability != null ? ` (dur ${g.durability})` : ""}</span>
+                <button disabled={blocked} className="text-[var(--good)] disabled:opacity-40" onClick={() => run(() => takeGroundItem(player.id, g.idx))}>take</button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Controls */}
       <div className="flex items-stretch gap-2">
         {/* 8-way compass */}
@@ -187,16 +205,19 @@ export default function WastelandView() {
                     <button disabled={isPending} className="text-[var(--amber)] disabled:opacity-40" onClick={() => run(() => trade(player.id, { type: "sell", itemId: b.id }))}>sell</button>
                   )
                 ) : (
-                  b.category === "CONSUMABLE" && (
-                    <button disabled={isPending} className="text-[var(--amber)] disabled:opacity-40" onClick={() => run(() => useConsumable(player.id, b.id))}>use</button>
-                  )
+                  <span className="flex shrink-0 gap-2">
+                    {b.category === "CONSUMABLE" && (
+                      <button disabled={isPending} className="text-[var(--amber)] disabled:opacity-40" onClick={() => run(() => useConsumable(player.id, b.id))}>use</button>
+                    )}
+                    <button disabled={blocked} className="text-[var(--ink-dim)] disabled:opacity-40" onClick={() => run(() => dropItem(player.id, b.id))}>drop</button>
+                  </span>
                 )}
               </div>
             ))}
           </div>
           <div className="grid grid-cols-3 gap-1">
             <Btn disabled={blocked} onClick={() => run(() => interact(player.id, "look"))}>Look</Btn>
-            <Btn disabled={blocked} onClick={() => run(() => interact(player.id, "search"))}>Search</Btn>
+            <Btn disabled={blocked || exp.searchedHere} onClick={() => run(() => interact(player.id, "search"))}>{exp.searchedHere ? "Searched" : "Search"}</Btn>
             <Btn disabled={blocked} onClick={() => run(() => interact(player.id, "rest"))}>Rest</Btn>
           </div>
           <Btn variant="go" disabled={isPending || !!exp.pending} onClick={() => run(() => returnHome(player.id))} className="py-1.5">
@@ -285,13 +306,16 @@ function Terminal({ snap, run, disabled }: { snap: GameSnapshot; run: (fn: () =>
     } else if (verb === "rest") {
       if (exp.pending) return setNote("Can't rest with a threat present.");
       run(() => interact(player.id, "rest"));
+    } else if (["take", "grab", "loot"].includes(verb)) {
+      if (exp.pending) return setNote("Not while something's in your face.");
+      run(() => takeAllGround(player.id));
     } else if (["use", "heal"].includes(verb)) {
       const want = verb === "heal" ? "" : arg;
       const item = exp.backpack.find((b) => b.category === "CONSUMABLE" && (want ? b.name.toLowerCase().includes(want) : true));
       if (!item) return setNote("No matching consumable in your pack.");
       run(() => useConsumable(player.id, item.id));
     } else if (verb === "help") {
-      setNote("move: n s e w ne nw se sw · fight · flee · recruit · buy [n] · aid · ignore · search · rest · look · use [item] · return");
+      setNote("move: n s e w ne nw se sw · search · take · look · rest · fight · flee · recruit · buy [n] · aid · use [item] · return");
     } else {
       setNote(`Unknown command: ${verb}`);
     }

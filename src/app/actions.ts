@@ -256,6 +256,13 @@ async function loadSnapshot(playerId: string, flash: string | null = null): Prom
       const condDef = CONDITIONS[(exp.condition as Condition) ?? "CLEAR"] ?? CONDITIONS.CLEAR;
       const terrFaction = factionAt(exp.seed, exp.posX, exp.posY);
       const rep = (player.factionRep as RepMap) ?? {};
+      const hereKey = `${exp.posX},${exp.posY}`;
+      const groundHere = ((exp.ground as unknown as Record<string, { defKey: string; quantity: number; durability: number | null }[]>) ?? {})[hereKey] ?? [];
+      const groundView = groundHere.map((g, idx) => ({
+        idx, defKey: g.defKey, name: ITEM_DEFS[g.defKey]?.name ?? g.defKey, icon: ITEM_DEFS[g.defKey]?.icon ?? "❔",
+        quantity: g.quantity, durability: g.durability,
+      }));
+      const searchedHere = new Set((exp.searched as unknown as string[]) ?? []).has(hereKey);
       expedition = {
         id: exp.id,
         seed: exp.seed,
@@ -278,6 +285,8 @@ async function loadSnapshot(playerId: string, flash: string | null = null): Prom
         backpack: backpack.map(itemView),
         backpackUsed: backpack.reduce((n, b) => n + b.quantity, 0),
         carryCap: BASE_CARRY + carryBonus,
+        ground: groundView,
+        searchedHere,
         pending: (exp.pending as unknown as EncounterView | null) ?? null,
         currentLabel: cur.label,
         atExit: exp.posX === 0 && exp.posY === 0,
@@ -592,11 +601,10 @@ export async function move(playerId: string, dir: Dir): Promise<GameSnapshot | n
         pending = { kind: "survivor", name, icon: "🧑" };
         entry.push(`🧑 ${survivorIntro(narr, name)}`);
       }
-    } else if (firstVisit && (tile.feature === "LOOT" || tile.feature === "CACHE")) {
-      const lootTile = cond === "BOUNTIFUL" ? { ...tile, tier: tile.tier + 1 } : tile;
-      const drops = lootForTile(exp.seed, lootTile);
-      const added = await addLootToBackpack(playerId, drops);
-      entry.push(added ? `${tile.icon} You scavenge the ${tile.label}. Recovered: ${added}.` : `${tile.icon} The ${tile.label} has already been stripped bare.`);
+    } else if (tile.feature === "LOOT" || tile.feature === "CACHE") {
+      // No auto-pickup — you have to search to turn anything up.
+      const searched = new Set((exp.searched as unknown as string[]) ?? []);
+      entry.push(searched.has(key) ? `${tile.icon} ${tile.label}. You've already picked through it.` : `${tile.icon} You reach ${tile.label}. Looks worth searching.`);
     } else if (firstVisit && tile.feature === "HAZARD") {
       const stormMult = cond === "RAD_STORM" ? 1.6 : 1;
       const dose = Math.round(randInt(narr, SURV.radPerHazard[0], SURV.radPerHazard[1]) * (tile.hazard === "RADIATION" ? 1 : 0.6) * stormMult);
@@ -662,6 +670,8 @@ export async function interact(playerId: string, kind: "look" | "search" | "rest
 
   const tile = tileAt(exp.seed, exp.posX, exp.posY);
   const tier = tierForDistance(chebyshev(exp.posX, exp.posY));
+  const cond = (exp.condition as Condition) ?? "CLEAR";
+  const key = `${exp.posX},${exp.posY}`;
   const salt = kind === "search" ? 222 : kind === "rest" ? 333 : 111;
   const narr = mulberry32(hashSeed(exp.seed, exp.posX, exp.posY, salt, Math.floor(Math.random() * 1e9)));
   let log = ((exp.log as unknown as string[]) ?? []).slice(0, 18);
@@ -704,19 +714,27 @@ export async function interact(playerId: string, kind: "look" | "search" | "rest
       log.unshift(`${e.icon} Your rest is cut short — ${enemyEntrance(narr, e.name)}`);
     }
   } else {
-    // search
+    // search — reveal this tile's loot onto the ground (once), or spring a trap.
     stamina = clamp(stamina - 5);
+    const searched = new Set((exp.searched as unknown as string[]) ?? []);
+    const ground = ((exp.ground as unknown as Record<string, GroundEntry[]>) ?? {}) as Record<string, GroundEntry[]>;
     const roll = narr();
     if (roll < 0.18 + tier * 0.03) {
       const e = wanderingEnemy(narr, tier);
       pending = { kind: "enemy", enemyKey: e.key, name: e.name, icon: e.icon, power: e.power, hp: e.power, maxHp: e.power };
       log.unshift(`${e.icon} You disturbed something — ${enemyEntrance(narr, e.name)}`);
-    } else if (roll < 0.7) {
-      const drops = generateLoot(narr, [["scrap", 4], ["cloth", 3], ["ration", 3], ["water_bottle", 3], ["ammo", 2]], tier, [1, 1]);
-      const added = await addLootToBackpack(playerId, drops);
-      log.unshift(added ? `You comb through the debris and turn up ${added}.` : searchNothing(narr));
+    } else if (searched.has(key)) {
+      log.unshift("You've already picked this spot clean.");
     } else {
-      log.unshift(searchNothing(narr));
+      const lootTier = cond === "BOUNTIFUL" ? tier + 1 : tier;
+      let drops = lootForTile(exp.seed, { ...tile, tier: lootTier });
+      if (drops.length === 0) {
+        drops = generateLoot(narr, [["scrap", 4], ["cloth", 3], ["ration", 3], ["water_bottle", 3], ["ammo", 2]], lootTier, [1, 2]);
+      }
+      searched.add(key);
+      const added = addToGround(ground, key, drops);
+      log.unshift(added ? `You search and turn up ${added}. (left on the ground — take what you want)` : searchNothing(narr));
+      await prisma.expedition.update({ where: { id: exp.id }, data: { searched: [...searched], ground: ground as unknown as Prisma.InputJsonValue } });
     }
   }
 
@@ -740,6 +758,8 @@ export async function resolveEncounter(playerId: string, choice: "fight" | "flee
   const combat = playerCombat(equipped, backpack);
   const rng = mulberry32(hashSeed(exp.seed, exp.posX, exp.posY, player.health, Math.floor(Math.random() * 1e9)));
   const log = ((exp.log as unknown as string[]) ?? []).slice(0, 12);
+  const key = `${exp.posX},${exp.posY}`;
+  const ground = ((exp.ground as unknown as Record<string, GroundEntry[]>) ?? {}) as Record<string, GroundEntry[]>;
 
   let health = player.health;
   let stamina = player.stamina;
@@ -771,11 +791,11 @@ export async function resolveEncounter(playerId: string, choice: "fight" | "flee
       newPending = null;
       const reward = (SURV.xpPerKill + pending.power / 4) * (pending.elite ? 1.8 : 1);
       xp += Math.round(reward);
-      // small loot from the body (elites drop more)
+      // The body's loot drops onto the ground for you to take.
       const tier = tierForDistance(chebyshev(exp.posX, exp.posY));
       const drops = lootForTile(exp.seed, { ...tileAt(exp.seed, exp.posX, exp.posY), feature: "CACHE" });
-      const added = await addLootToBackpack(playerId, drops.slice(0, (1 + Math.floor(tier / 2)) * (pending.elite ? 2 : 1)));
-      log.unshift(`🎖️ Defeated the ${pending.name}. +${Math.round(reward)} XP${added ? `, looted ${added}` : ""}.`);
+      const added = addToGround(ground, key, drops.slice(0, (1 + Math.floor(tier / 2)) * (pending.elite ? 2 : 1)));
+      log.unshift(`🎖️ Defeated the ${pending.name}. +${Math.round(reward)} XP${added ? `. They dropped ${added} — on the ground` : ""}.`);
       // Killing a faction's fighters sours your standing with them (and warms a rival).
       const f = pending.faction as FactionKey | null | undefined;
       if (f) {
@@ -798,7 +818,7 @@ export async function resolveEncounter(playerId: string, choice: "fight" | "flee
     return applyDeath(playerId, exp.id, `The ${pending.name} got you.`);
   }
 
-  await prisma.expedition.update({ where: { id: exp.id }, data: { log, pending: newPending ? (newPending as unknown as Prisma.InputJsonValue) : Prisma.DbNull } });
+  await prisma.expedition.update({ where: { id: exp.id }, data: { log, ground: ground as unknown as Prisma.InputJsonValue, pending: newPending ? (newPending as unknown as Prisma.InputJsonValue) : Prisma.DbNull } });
   await prisma.player.update({ where: { id: playerId }, data: { health, stamina, xp, level, maxHealth: 100 + (level - 1) * 10 } });
   revalidatePath("/");
   return loadSnapshot(playerId);
@@ -926,6 +946,87 @@ export async function useConsumable(playerId: string, itemId: string): Promise<G
   return loadSnapshot(playerId, `Used ${def.name}.`);
 }
 
+/** Pick up a single ground stack on the current tile (respects carry cap). */
+export async function takeGroundItem(playerId: string, idx: number): Promise<GameSnapshot | null> {
+  const player = await prisma.player.findUnique({ where: { id: playerId } });
+  if (!player || player.state !== "IN_EXPEDITION") return loadSnapshot(playerId);
+  const exp = await prisma.expedition.findFirst({ where: { playerId, status: "ACTIVE" } });
+  if (!exp) return loadSnapshot(playerId);
+  if (exp.pending) return loadSnapshot(playerId, "Not while something's in your face.");
+
+  const key = `${exp.posX},${exp.posY}`;
+  const ground = ((exp.ground as unknown as Record<string, GroundEntry[]>) ?? {}) as Record<string, GroundEntry[]>;
+  const list = ground[key] ?? [];
+  const entry = list[idx];
+  if (!entry) return loadSnapshot(playerId);
+
+  const remaining = await carryRemaining(playerId);
+  if (remaining <= 0) return loadSnapshot(playerId, "Your pack is full — drop something first.");
+  const def = ITEM_DEFS[entry.defKey];
+  const take = def?.stackable ? Math.min(entry.quantity, remaining) : 1;
+  await addItem(playerId, entry.defKey, take, "BACKPACK", entry.durability);
+  if (def?.stackable && entry.quantity > take) entry.quantity -= take;
+  else list.splice(idx, 1);
+  if (list.length === 0) delete ground[key]; else ground[key] = list;
+
+  const log = ((exp.log as unknown as string[]) ?? []).slice(0, 22);
+  log.unshift(`Picked up ${take}× ${def?.name ?? entry.defKey}.`);
+  await prisma.expedition.update({ where: { id: exp.id }, data: { ground: ground as unknown as Prisma.InputJsonValue, log } });
+  revalidatePath("/");
+  return loadSnapshot(playerId);
+}
+
+/** Pick up everything on the current tile that fits in your pack. */
+export async function takeAllGround(playerId: string): Promise<GameSnapshot | null> {
+  const player = await prisma.player.findUnique({ where: { id: playerId } });
+  if (!player || player.state !== "IN_EXPEDITION") return loadSnapshot(playerId);
+  const exp = await prisma.expedition.findFirst({ where: { playerId, status: "ACTIVE" } });
+  if (!exp) return loadSnapshot(playerId);
+  if (exp.pending) return loadSnapshot(playerId, "Not while something's in your face.");
+
+  const key = `${exp.posX},${exp.posY}`;
+  const ground = ((exp.ground as unknown as Record<string, GroundEntry[]>) ?? {}) as Record<string, GroundEntry[]>;
+  let list = ground[key] ?? [];
+  let remaining = await carryRemaining(playerId);
+  let took = 0;
+  const kept: GroundEntry[] = [];
+  for (const entry of list) {
+    const def = ITEM_DEFS[entry.defKey];
+    if (remaining <= 0) { kept.push(entry); continue; }
+    const take = def?.stackable ? Math.min(entry.quantity, remaining) : 1;
+    await addItem(playerId, entry.defKey, take, "BACKPACK", entry.durability);
+    remaining -= take;
+    took += take;
+    if (def?.stackable && entry.quantity > take) kept.push({ ...entry, quantity: entry.quantity - take });
+  }
+  if (kept.length === 0) delete ground[key]; else ground[key] = kept;
+  const log = ((exp.log as unknown as string[]) ?? []).slice(0, 22);
+  log.unshift(took ? `Grabbed ${took} item(s) off the ground.${kept.length ? " Pack full — left the rest." : ""}` : "Your pack is full.");
+  await prisma.expedition.update({ where: { id: exp.id }, data: { ground: ground as unknown as Prisma.InputJsonValue, log } });
+  revalidatePath("/");
+  return loadSnapshot(playerId);
+}
+
+/** Drop a backpack stack onto the current tile's ground. */
+export async function dropItem(playerId: string, itemId: string): Promise<GameSnapshot | null> {
+  const player = await prisma.player.findUnique({ where: { id: playerId } });
+  if (!player || player.state !== "IN_EXPEDITION") return loadSnapshot(playerId);
+  const exp = await prisma.expedition.findFirst({ where: { playerId, status: "ACTIVE" } });
+  if (!exp) return loadSnapshot(playerId);
+  const item = (await prisma.itemStack.findFirst({ where: { id: itemId, playerId, location: "BACKPACK" } })) as StackRow | null;
+  if (!item) return loadSnapshot(playerId);
+
+  const key = `${exp.posX},${exp.posY}`;
+  const ground = ((exp.ground as unknown as Record<string, GroundEntry[]>) ?? {}) as Record<string, GroundEntry[]>;
+  addToGround(ground, key, [{ defKey: item.defKey, quantity: item.quantity, durability: item.durability }]);
+  await prisma.itemStack.delete({ where: { id: item.id } });
+  const log = ((exp.log as unknown as string[]) ?? []).slice(0, 22);
+  log.unshift(`Dropped ${item.quantity}× ${ITEM_DEFS[item.defKey]?.name ?? item.defKey}.`);
+  await prisma.expedition.update({ where: { id: exp.id }, data: { ground: ground as unknown as Prisma.InputJsonValue, log } });
+  revalidatePath("/");
+  return loadSnapshot(playerId);
+}
+
 export async function returnHome(playerId: string): Promise<GameSnapshot | null> {
   const player = await prisma.player.findUnique({ where: { id: playerId }, include: { shelter: true } });
   if (!player?.shelter || player.state !== "IN_EXPEDITION") return loadSnapshot(playerId);
@@ -1011,25 +1112,34 @@ async function applyDeath(playerId: string, expId: string, reason: string): Prom
 }
 
 /** Add loot drops to the backpack, respecting carry capacity. Returns a summary. */
-async function addLootToBackpack(playerId: string, drops: { defKey: string; quantity: number; durability: number | null }[]): Promise<string> {
+type GroundEntry = { defKey: string; quantity: number; durability: number | null };
+
+/** Drop loot onto a tile's ground pile (stackables merge). Returns a summary. */
+function addToGround(ground: Record<string, GroundEntry[]>, key: string, drops: GroundEntry[]): string {
   if (!drops.length) return "";
-  const player = await prisma.player.findUnique({ where: { id: playerId } });
+  const list = ground[key] ?? (ground[key] = []);
+  const parts: string[] = [];
+  for (const d of drops) {
+    const def = ITEM_DEFS[d.defKey];
+    if (def?.stackable) {
+      const ex = list.find((g) => g.defKey === d.defKey);
+      if (ex) ex.quantity += d.quantity;
+      else list.push({ defKey: d.defKey, quantity: d.quantity, durability: null });
+    } else {
+      list.push({ defKey: d.defKey, quantity: 1, durability: d.durability ?? def?.maxDurability ?? null });
+    }
+    parts.push(`${d.quantity}× ${def?.name ?? d.defKey}`);
+  }
+  return parts.join(", ");
+}
+
+/** Remaining backpack capacity (cap − items carried). */
+async function carryRemaining(playerId: string): Promise<number> {
   const equipped = (await prisma.itemStack.findMany({ where: { playerId, equippedSlot: { not: null } } })) as StackRow[];
   const bp = equipped.find((e) => e.equippedSlot === "BACKPACK");
-  const carryCap = BASE_CARRY + (bp ? ITEM_DEFS[bp.defKey]?.carryBonus ?? 0 : 0);
-  let used = (await prisma.itemStack.findMany({ where: { playerId, location: "BACKPACK" } })).reduce((n, s) => n + s.quantity, 0);
-  if (!player) return "";
-
-  const summary: string[] = [];
-  for (const d of drops) {
-    let qty = d.quantity;
-    if (used + qty > carryCap) qty = Math.max(0, carryCap - used);
-    if (qty <= 0) break;
-    await addItem(playerId, d.defKey, qty, "BACKPACK", d.durability);
-    used += qty;
-    summary.push(`${qty}× ${ITEM_DEFS[d.defKey]?.name ?? d.defKey}`);
-  }
-  return summary.join(", ");
+  const cap = BASE_CARRY + (bp ? ITEM_DEFS[bp.defKey]?.carryBonus ?? 0 : 0);
+  const used = (await prisma.itemStack.findMany({ where: { playerId, location: "BACKPACK" } })).reduce((n, s) => n + s.quantity, 0);
+  return cap - used;
 }
 
 async function addItem(playerId: string, defKey: string, qty: number, location: "STORAGE" | "BACKPACK", durability: number | null = null): Promise<void> {

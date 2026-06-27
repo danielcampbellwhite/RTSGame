@@ -142,11 +142,13 @@ model Expedition {
   posY     Int @default(0)
   distance Int @default(0) // Chebyshev distance from exit -> risk/reward scaling
 
-  visited Json  @default("[]") // entered tile keys "x,y" (your trail)
-  spotted Json  @default("[]") // tiles seen from afar via `look` (not entered)
-  cleared Json  @default("[]") // tiles whose NPC is resolved/gone (won't re-trigger)
-  log     Json  @default("[]") // recent event log entries
-  pending Json? // an encounter on the current tile awaiting the player's choice
+  visited  Json  @default("[]") // entered tile keys "x,y" (your trail)
+  spotted  Json  @default("[]") // tiles seen from afar via `look` (not entered)
+  cleared  Json  @default("[]") // tiles whose NPC is resolved/gone (won't re-trigger)
+  searched Json  @default("[]") // tiles already searched (loot won't regenerate)
+  ground   Json  @default("{}") // items lying on each tile: { "x,y": [{defKey,quantity,durability}] }
+  log      Json  @default("[]") // recent event log entries
+  pending  Json? // an encounter on the current tile awaiting the player's choice
 
   startedAt DateTime  @default(now())
   endedAt   DateTime?

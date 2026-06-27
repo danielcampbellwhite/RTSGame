@@ -32,6 +32,15 @@ export interface TileView {
   isExit?: boolean;
 }
 
+export interface GroundItemView {
+  idx: number; // index in the tile's ground array
+  defKey: string;
+  name: string;
+  icon: string;
+  quantity: number;
+  durability: number | null;
+}
+
 export interface EnemyEncounter {
   kind: "enemy";
   enemyKey: string;
@@ -96,6 +105,8 @@ export interface ExpeditionView {
   backpack: ItemView[];
   backpackUsed: number;
   carryCap: number;
+  ground: GroundItemView[]; // items lying on the player's current tile
+  searchedHere: boolean;
   pending: EncounterView | null;
   currentLabel: string;
   atExit: boolean;
