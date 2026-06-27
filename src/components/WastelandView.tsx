@@ -32,7 +32,7 @@ export default function WastelandView() {
       </div>
 
       {/* Map with environmental backdrop */}
-      <div className="wasteland-bg panel relative overflow-hidden rounded p-3" style={{ ["--biome" as string]: exp.biomeColor, height: "32%" }}>
+      <div className="wasteland-bg panel relative min-h-0 flex-1 overflow-hidden rounded p-3" style={{ ["--biome" as string]: exp.biomeColor }}>
         <div className="relative mx-auto grid h-full w-full max-w-[420px] gap-[3px]" style={{ gridTemplateColumns: `repeat(${cols}, 1fr)` }}>
           {exp.tiles.map((t) => {
             let bg = "transparent";
@@ -203,8 +203,8 @@ function Terminal({ snap, run, disabled }: { snap: GameSnapshot; run: (fn: () =>
   const feed = [...exp!.log].reverse();
 
   return (
-    <div className="panel flex-1 rounded p-2">
-      <div ref={ref} className="h-full min-h-[90px] overflow-y-auto scroll-thin pr-1 text-[11px] leading-relaxed">
+    <div className="panel shrink-0 rounded p-2">
+      <div ref={ref} className="h-24 overflow-y-auto scroll-thin pr-1 text-[11px] leading-relaxed">
         {feed.map((l, i) => (
           <div key={i} className="text-[var(--ink)]">
             <span className="text-[var(--ink-dim)]">› </span>{l}

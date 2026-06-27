@@ -28,7 +28,7 @@ import type {
 } from "@/lib/types";
 import { revalidatePath } from "next/cache";
 
-const WINDOW_RADIUS = 5;
+const WINDOW_RADIUS = 4;
 const BASE_CARRY = 12;
 
 // ── small helpers ────────────────────────────────────────────────────────────
@@ -469,8 +469,15 @@ export async function interact(playerId: string, kind: "look" | "search" | "rest
   let pending: EncounterView | null = null;
 
   if (kind === "look") {
-    log.unshift(`Exits lie in every direction. You could move on, search the area, or rest.`);
+    // Free reconnaissance: describe where you stand and the terrain around you
+    // (terrain only — you still won't know what's in a tile until you enter it).
     log.unshift(`${tile.icon} ${tile.label}. ${sightFor(narr, tile.biome)}`);
+    const around = ([["N", 0, -1], ["E", 1, 0], ["S", 0, 1], ["W", -1, 0]] as const).map(([name, dx, dy]) => {
+      const nx = exp.posX + dx, ny = exp.posY + dy;
+      const exit = nx === 0 && ny === 0 ? " (shelter!)" : "";
+      return `${name} ${BIOMES[tileAt(exp.seed, nx, ny).biome].name}${exit}`;
+    });
+    log.unshift(`You scan the horizon — ${around.join(" · ")}.`);
   } else if (kind === "rest") {
     stamina = clamp(stamina + 30);
     log.unshift("You find cover, slow your breathing, and recover. (+stamina)");
