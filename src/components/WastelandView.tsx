@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useGame } from "@/store/game";
 import { Btn, Meter, useAction } from "@/components/ui";
-import { move, resolveEncounter, returnHome, useConsumable, interact, recruitSurvivor, type Dir } from "@/app/actions";
+import { move, resolveEncounter, returnHome, useConsumable, interact, recruitSurvivor, trade, helpInjured, type Dir } from "@/app/actions";
 import type { GameSnapshot } from "@/lib/types";
 
 export default function WastelandView() {
@@ -14,6 +14,8 @@ export default function WastelandView() {
 
   const cols = exp.windowRadius * 2 + 1;
   const ammo = exp.backpack.filter((b) => b.defKey === "ammo").reduce((n, b) => n + b.quantity, 0);
+  const scrap = exp.backpack.filter((b) => b.defKey === "scrap").reduce((n, b) => n + b.quantity, 0);
+  const isTrader = exp.pending?.kind === "trader";
   const blocked = !!exp.pending || isPending;
 
   return (
@@ -115,6 +117,41 @@ export default function WastelandView() {
           </div>
         </div>
       )}
+      {exp.pending && exp.pending.kind === "trader" && (
+        <div className="panel rounded p-2" style={{ borderColor: "var(--amber)" }}>
+          <div className="mb-1 flex items-center justify-between">
+            <span className="text-sm text-[var(--amber)]">🧑‍🔧 {exp.pending.name} · Trader</span>
+            <Btn disabled={isPending} onClick={() => run(() => trade(player.id, { type: "leave" }))}>Leave</Btn>
+          </div>
+          <div className="text-[9px] text-[var(--ink-dim)]">pay with 🔩 scrap from your pack (you have {scrap})</div>
+          <div className="mt-1 grid grid-cols-1 gap-1">
+            {exp.pending.offers.map((o, i) => (
+              <div key={i} className="inset flex items-center justify-between rounded px-2 py-1 text-xs">
+                <span>{o.icon} {o.name}</span>
+                <Btn disabled={isPending || scrap < o.price} onClick={() => run(() => trade(player.id, { type: "buy", index: i }))}>{o.price} 🔩</Btn>
+              </div>
+            ))}
+            {exp.pending.offers.length === 0 && <div className="text-[10px] text-[var(--ink-dim)]">Sold out. Sell from your pack below, or leave.</div>}
+          </div>
+        </div>
+      )}
+      {exp.pending && exp.pending.kind === "injured" && (
+        <div className="panel rounded p-2" style={{ borderColor: "var(--blood)" }}>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className="text-2xl">🩸</span>
+              <div>
+                <div className="text-sm text-[#ffb4b4]">{exp.pending.name}</div>
+                <div className="text-[10px] text-[var(--ink-dim)]">wounded — needs a {exp.pending.needName}</div>
+              </div>
+            </div>
+            <div className="flex gap-1">
+              <Btn variant="go" disabled={isPending} onClick={() => run(() => helpInjured(player.id, true))}>Help</Btn>
+              <Btn disabled={isPending} onClick={() => run(() => helpInjured(player.id, false))}>Leave</Btn>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Controls */}
       <div className="flex items-stretch gap-2">
@@ -142,8 +179,14 @@ export default function WastelandView() {
             {exp.backpack.map((b) => (
               <div key={b.id} className="flex items-center justify-between py-0.5">
                 <span className="truncate">{b.icon} {b.name}{b.quantity > 1 ? ` ×${b.quantity}` : ""}</span>
-                {b.category === "CONSUMABLE" && (
-                  <button disabled={isPending} className="text-[var(--amber)] disabled:opacity-40" onClick={() => run(() => useConsumable(player.id, b.id))}>use</button>
+                {isTrader ? (
+                  b.defKey !== "scrap" && (
+                    <button disabled={isPending} className="text-[var(--amber)] disabled:opacity-40" onClick={() => run(() => trade(player.id, { type: "sell", itemId: b.id }))}>sell</button>
+                  )
+                ) : (
+                  b.category === "CONSUMABLE" && (
+                    <button disabled={isPending} className="text-[var(--amber)] disabled:opacity-40" onClick={() => run(() => useConsumable(player.id, b.id))}>use</button>
+                  )
                 )}
               </div>
             ))}
@@ -197,6 +240,7 @@ function Terminal({ snap, run, disabled }: { snap: GameSnapshot; run: (fn: () =>
     setCmd("");
     const [verb, ...rest] = raw.split(/\s+/);
     const arg = rest.join(" ");
+    const pk = exp.pending?.kind;
     setNote("");
 
     if (MOVE_WORDS[verb] || (verb === "go" && MOVE_WORDS[arg])) {
@@ -209,13 +253,26 @@ function Terminal({ snap, run, disabled }: { snap: GameSnapshot; run: (fn: () =>
       if (exp.pending?.kind !== "enemy") return setNote("Nothing to flee from.");
       run(() => resolveEncounter(player.id, "flee"));
     } else if (["recruit", "invite"].includes(verb)) {
-      if (exp.pending?.kind !== "survivor") return setNote("No survivor here to recruit.");
+      if (pk !== "survivor") return setNote("No survivor here to recruit.");
       run(() => recruitSurvivor(player.id, true));
-    } else if (["ignore", "wave", "dismiss"].includes(verb)) {
-      if (exp.pending?.kind !== "survivor") return setNote("No one to wave off.");
-      run(() => recruitSurvivor(player.id, false));
+    } else if (verb === "buy") {
+      if (pk !== "trader") return setNote("No trader here.");
+      const idx = parseInt(arg, 10) - 1;
+      if (Number.isNaN(idx)) return setNote("Usage: buy <number>");
+      run(() => trade(player.id, { type: "buy", index: idx }));
+    } else if (["aid", "give"].includes(verb)) {
+      if (pk !== "injured") return setNote("No one here to aid.");
+      run(() => helpInjured(player.id, true));
+    } else if (["ignore", "dismiss", "wave", "moveon"].includes(verb)) {
+      if (pk === "survivor") run(() => recruitSurvivor(player.id, false));
+      else if (pk === "trader") run(() => trade(player.id, { type: "leave" }));
+      else if (pk === "injured") run(() => helpInjured(player.id, false));
+      else setNote("Nothing to ignore.");
     } else if (["r", "return", "home", "leave"].includes(verb)) {
-      if (exp.pending) return setNote("Can't leave mid-fight.");
+      if (pk === "enemy") return setNote("Can't leave mid-fight.");
+      if (pk === "survivor") return run(() => recruitSurvivor(player.id, false));
+      if (pk === "trader") return run(() => trade(player.id, { type: "leave" }));
+      if (pk === "injured") return run(() => helpInjured(player.id, false));
       run(() => returnHome(player.id));
     } else if (["look", "l", "examine", "scan"].includes(verb)) {
       run(() => interact(player.id, "look"));
@@ -231,7 +288,7 @@ function Terminal({ snap, run, disabled }: { snap: GameSnapshot; run: (fn: () =>
       if (!item) return setNote("No matching consumable in your pack.");
       run(() => useConsumable(player.id, item.id));
     } else if (verb === "help") {
-      setNote("move: n s e w ne nw se sw · fight · flee · recruit · ignore · search · rest · look · use [item] · return");
+      setNote("move: n s e w ne nw se sw · fight · flee · recruit · buy [n] · aid · ignore · search · rest · look · use [item] · return");
     } else {
       setNote(`Unknown command: ${verb}`);
     }

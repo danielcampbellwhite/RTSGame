@@ -48,7 +48,29 @@ export interface SurvivorEncounter {
   icon: string;
 }
 
-export type EncounterView = EnemyEncounter | SurvivorEncounter;
+export interface TradeOffer {
+  defKey: string;
+  name: string;
+  icon: string;
+  price: number; // in scrap carried in your pack
+}
+
+export interface TraderEncounter {
+  kind: "trader";
+  name: string;
+  icon: string;
+  offers: TradeOffer[];
+}
+
+export interface InjuredEncounter {
+  kind: "injured";
+  name: string;
+  icon: string;
+  needDef: string; // consumable required to help (e.g. "bandage" | "medkit")
+  needName: string;
+}
+
+export type EncounterView = EnemyEncounter | SurvivorEncounter | TraderEncounter | InjuredEncounter;
 
 export interface ExpeditionView {
   id: string;
@@ -87,6 +109,10 @@ export interface ShelterView {
   medicalLvl: number;
   ammoBenchLvl: number;
   weaponBenchLvl: number;
+  workFood: number;
+  workWater: number;
+  workScrap: number;
+  workMeds: number;
 }
 
 export interface PlayerView {

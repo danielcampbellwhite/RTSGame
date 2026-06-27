@@ -6,7 +6,7 @@ import { ITEM_DEFS, type ItemDef } from "@/data/items";
 import { RECIPES, upgradeCost, stationLevelReq, type Station } from "@/data/recipes";
 import {
   SURV,
-  depleteResources,
+  tickShelter,
   clamp,
   resolveFight,
   resolveFlee,
@@ -14,12 +14,52 @@ import {
   type ResourceKey,
   type PlayerCombat,
 } from "@/lib/game";
-import { mulberry32, hashSeed, randInt, chance } from "@/lib/rng";
+import { mulberry32, hashSeed, randInt, chance, weighted, pick } from "@/lib/rng";
 import { tileAt, lootForTile, enemyForTile, wanderingEnemy, generateLoot, scanAhead, chebyshev, tierForDistance } from "@/lib/wasteland";
 import { BIOMES } from "@/data/world";
 import { sightFor, ambientLine, enemyEntrance, hazardLine, searchNothing, survivorIntro } from "@/data/flavor";
 
 const NOTABLE_FEATURES = new Set(["LOOT", "ENEMY", "HAZARD", "SURVIVOR"]);
+
+const TRADER_POOL = ["pistol", "shotgun", "rifle", "vest", "helmet", "jacket", "knife", "bat", "rucksack", "medkit", "bandage", "radaway", "stim", "ammo"];
+const WORK_FIELD = { food: "workFood", water: "workWater", scrap: "workScrap", meds: "workMeds" } as const;
+
+function offerPrice(defKey: string): number {
+  const d = ITEM_DEFS[defKey];
+  if (!d) return 4;
+  const base = d.category === "WEAPON" ? 8 : d.category === "ARMOR" ? 6 : 2;
+  return Math.max(2, base + d.tier * 3);
+}
+
+function traderOffers(rng: () => number, tier: number): { defKey: string; name: string; icon: string; price: number }[] {
+  const pool = TRADER_POOL.filter((k) => (ITEM_DEFS[k]?.tier ?? 9) <= tier + 1);
+  const picks: string[] = [];
+  const n = 2 + Math.floor(rng() * 2);
+  let guard = 0;
+  while (picks.length < n && guard++ < 40) {
+    const k = pool[Math.floor(rng() * pool.length)];
+    if (k && !picks.includes(k)) picks.push(k);
+  }
+  return picks.map((k) => ({ defKey: k, name: ITEM_DEFS[k].name, icon: ITEM_DEFS[k].icon, price: offerPrice(k) }));
+}
+
+async function backpackQty(playerId: string, defKey: string): Promise<number> {
+  const rows = await prisma.itemStack.findMany({ where: { playerId, defKey, location: "BACKPACK" } });
+  return rows.reduce((n, r) => n + r.quantity, 0);
+}
+
+async function consumeBackpack(playerId: string, defKey: string, qty: number): Promise<boolean> {
+  const rows = (await prisma.itemStack.findMany({ where: { playerId, defKey, location: "BACKPACK" } })) as StackRow[];
+  if (rows.reduce((n, r) => n + r.quantity, 0) < qty) return false;
+  let remaining = qty;
+  for (const r of rows) {
+    if (remaining <= 0) break;
+    const take = Math.min(remaining, r.quantity);
+    await consumeStack(r, take);
+    remaining -= take;
+  }
+  return true;
+}
 
 /** Brief readout of notable things in the 4 adjacent tiles. */
 function surroundings(seed: number, x: number, y: number): string {
@@ -111,25 +151,25 @@ async function loadSnapshot(playerId: string, flash: string | null = null): Prom
   const player = await prisma.player.findUnique({ where: { id: playerId }, include: { shelter: true } });
   if (!player || !player.shelter) return null;
 
-  // Passive shelter depletion since last read.
+  // Advance the shelter economy (worker production − population consumption).
   const now = new Date();
-  const fresh = depleteResources(
+  const shRow = player.shelter;
+  const fresh = tickShelter(
     {
-      food: player.shelter.food,
-      water: player.shelter.water,
-      meds: player.shelter.meds,
-      ammo: player.shelter.ammo,
-      scrap: player.shelter.scrap,
-      fuel: player.shelter.fuel,
-      morale: player.shelter.morale,
-      lastTickAt: player.shelter.lastTickAt,
+      food: shRow.food, water: shRow.water, meds: shRow.meds, scrap: shRow.scrap, fuel: shRow.fuel, morale: shRow.morale,
+      population: shRow.population,
+      workFood: shRow.workFood, workWater: shRow.workWater, workScrap: shRow.workScrap, workMeds: shRow.workMeds,
+      lastTickAt: shRow.lastTickAt,
     },
     now
   );
-  if (fresh.lastTickAt !== player.shelter.lastTickAt) {
+  if (fresh.changed) {
     await prisma.shelter.update({
-      where: { id: player.shelter.id },
-      data: { food: Math.round(fresh.food), water: Math.round(fresh.water), fuel: Math.round(fresh.fuel), morale: Math.round(fresh.morale), lastTickAt: now },
+      where: { id: shRow.id },
+      data: {
+        food: Math.round(fresh.food), water: Math.round(fresh.water), meds: Math.round(fresh.meds),
+        scrap: Math.round(fresh.scrap), fuel: Math.round(fresh.fuel), morale: Math.round(fresh.morale), lastTickAt: now,
+      },
     });
   }
 
@@ -244,9 +284,9 @@ async function loadSnapshot(playerId: string, flash: string | null = null): Prom
       popCap: sh.popCap,
       food: Math.round(fresh.food),
       water: Math.round(fresh.water),
-      meds: sh.meds,
+      meds: Math.round(fresh.meds),
       ammo: sh.ammo,
-      scrap: sh.scrap,
+      scrap: Math.round(fresh.scrap),
       fuel: Math.round(fresh.fuel),
       morale: Math.round(fresh.morale),
       storageCap: sh.storageCap,
@@ -255,6 +295,10 @@ async function loadSnapshot(playerId: string, flash: string | null = null): Prom
       medicalLvl: sh.medicalLvl,
       ammoBenchLvl: sh.ammoBenchLvl,
       weaponBenchLvl: sh.weaponBenchLvl,
+      workFood: sh.workFood,
+      workWater: sh.workWater,
+      workScrap: sh.workScrap,
+      workMeds: sh.workMeds,
     },
     storage: storage.map(itemView),
     equipped,
@@ -383,6 +427,43 @@ export async function upgrade(playerId: string, target: Station | "storage" | "s
   return loadSnapshot(playerId, "Upgrade complete.");
 }
 
+/** Assign or unassign a survivor to a resource job (+1 / -1). */
+export async function assignWork(playerId: string, job: "food" | "water" | "scrap" | "meds", delta: number): Promise<GameSnapshot | null> {
+  const player = await prisma.player.findUnique({ where: { id: playerId }, include: { shelter: true } });
+  if (!player?.shelter || player.state !== "AT_SHELTER") return loadSnapshot(playerId);
+  const sh = player.shelter;
+  const field = WORK_FIELD[job];
+  const assigned = sh.workFood + sh.workWater + sh.workScrap + sh.workMeds;
+  const cur = (sh as unknown as Record<string, number>)[field];
+  if (delta > 0) {
+    if (assigned >= sh.population) return loadSnapshot(playerId, "No idle survivors to assign.");
+    await prisma.shelter.update({ where: { id: sh.id }, data: { [field]: cur + 1 } });
+  } else {
+    if (cur <= 0) return loadSnapshot(playerId);
+    await prisma.shelter.update({ where: { id: sh.id }, data: { [field]: cur - 1 } });
+  }
+  revalidatePath("/");
+  return loadSnapshot(playerId);
+}
+
+/** Repair a piece of gear at the workshop, restoring durability for scrap. */
+export async function repairItem(playerId: string, itemId: string): Promise<GameSnapshot | null> {
+  const player = await prisma.player.findUnique({ where: { id: playerId }, include: { shelter: true } });
+  if (!player?.shelter || player.state !== "AT_SHELTER") return loadSnapshot(playerId);
+  if (player.shelter.workshopLvl < 1) return loadSnapshot(playerId, "Build a Workshop to repair gear.");
+  const item = (await prisma.itemStack.findFirst({ where: { id: itemId, playerId } })) as StackRow | null;
+  if (!item) return loadSnapshot(playerId);
+  const def = ITEM_DEFS[item.defKey];
+  if (!def?.maxDurability || item.durability == null) return loadSnapshot(playerId, "Nothing to repair.");
+  if (item.durability >= def.maxDurability) return loadSnapshot(playerId, "Already in good condition.");
+  const cost = Math.max(1, Math.ceil((def.maxDurability - item.durability) / 12));
+  if (player.shelter.scrap < cost) return loadSnapshot(playerId, `Need ${cost} scrap to repair.`);
+  await prisma.shelter.update({ where: { id: player.shelter.id }, data: { scrap: { decrement: cost } } });
+  await prisma.itemStack.update({ where: { id: itemId }, data: { durability: def.maxDurability } });
+  revalidatePath("/");
+  return loadSnapshot(playerId, `Repaired ${def.name} for ${cost} scrap.`);
+}
+
 // ── expedition ──────────────────────────────────────────────────────────────────
 
 export async function startExpedition(playerId: string): Promise<GameSnapshot | null> {
@@ -443,8 +524,18 @@ export async function move(playerId: string, dir: Dir): Promise<GameSnapshot | n
       entry.push(`${e.icon} ${enemyEntrance(narr, e.name)}`);
     } else if (firstVisit && tile.feature === "SURVIVOR") {
       const name = tile.survivorName ?? "a stranger";
-      pending = { kind: "survivor", name, icon: "🧑" };
-      entry.push(`🧑 ${survivorIntro(narr, name)}`);
+      const sub = weighted(narr, [["recruit", 5], ["trader", 3], ["injured", 2]]);
+      if (sub === "trader") {
+        pending = { kind: "trader", name, icon: "🧑‍🔧", offers: traderOffers(narr, tile.tier) };
+        entry.push(`🧑‍🔧 ${name}, a trader, waves you over. "Got goods — if you've got scrap."`);
+      } else if (sub === "injured") {
+        const needDef = pick(narr, ["bandage", "medkit"]);
+        pending = { kind: "injured", name, icon: "🩸", needDef, needName: ITEM_DEFS[needDef].name };
+        entry.push(`🩸 ${name} lies wounded, begging for a ${ITEM_DEFS[needDef].name}.`);
+      } else {
+        pending = { kind: "survivor", name, icon: "🧑" };
+        entry.push(`🧑 ${survivorIntro(narr, name)}`);
+      }
     } else if (firstVisit && (tile.feature === "LOOT" || tile.feature === "CACHE")) {
       const drops = lootForTile(exp.seed, tile);
       const added = await addLootToBackpack(playerId, drops);
@@ -646,6 +737,70 @@ export async function recruitSurvivor(playerId: string, accept: boolean): Promis
     await prisma.shelter.update({ where: { id: player.shelter.id }, data: { population: { increment: 1 }, morale: { increment: 3 } } });
     log.unshift(`🤝 ${pending.name} will make their way to your shelter. Population +1.`);
   }
+  await prisma.expedition.update({ where: { id: exp.id }, data: { log, pending: Prisma.DbNull } });
+  revalidatePath("/");
+  return loadSnapshot(playerId);
+}
+
+export type TradeOp = { type: "buy"; index: number } | { type: "sell"; itemId: string } | { type: "leave" };
+
+/** Barter with a trader using the scrap you're carrying. */
+export async function trade(playerId: string, op: TradeOp): Promise<GameSnapshot | null> {
+  const player = await prisma.player.findUnique({ where: { id: playerId } });
+  if (!player || player.state !== "IN_EXPEDITION") return loadSnapshot(playerId);
+  const exp = await prisma.expedition.findFirst({ where: { playerId, status: "ACTIVE" } });
+  const pending = exp?.pending as unknown as EncounterView | null;
+  if (!exp || !pending || pending.kind !== "trader") return loadSnapshot(playerId);
+  let log = ((exp.log as unknown as string[]) ?? []).slice(0, 22);
+
+  if (op.type === "leave") {
+    log.unshift(`You part ways with ${pending.name}.`);
+    await prisma.expedition.update({ where: { id: exp.id }, data: { log, pending: Prisma.DbNull } });
+  } else if (op.type === "buy") {
+    const offer = pending.offers[op.index];
+    if (!offer) return loadSnapshot(playerId);
+    if ((await backpackQty(playerId, "scrap")) < offer.price) return loadSnapshot(playerId, `Not enough scrap (need ${offer.price}).`);
+    await consumeBackpack(playerId, "scrap", offer.price);
+    await addItem(playerId, offer.defKey, 1, "BACKPACK");
+    const offers = pending.offers.filter((_, i) => i !== op.index);
+    log.unshift(`Bought ${offer.name} for ${offer.price} scrap.`);
+    await prisma.expedition.update({ where: { id: exp.id }, data: { log, pending: { ...pending, offers } as unknown as Prisma.InputJsonValue } });
+  } else {
+    const item = (await prisma.itemStack.findUnique({ where: { id: op.itemId } })) as StackRow | null;
+    if (!item || item.location !== "BACKPACK" || item.defKey === "scrap") return loadSnapshot(playerId, "Can't sell that.");
+    const price = Math.max(1, Math.round(offerPrice(item.defKey) / 2));
+    await consumeStack(item, 1);
+    await addItem(playerId, "scrap", price, "BACKPACK");
+    log.unshift(`Sold ${ITEM_DEFS[item.defKey]?.name ?? item.defKey} for ${price} scrap.`);
+    await prisma.expedition.update({ where: { id: exp.id }, data: { log } });
+  }
+  revalidatePath("/");
+  return loadSnapshot(playerId);
+}
+
+/** Help (or abandon) an injured survivor. Helping costs a consumable, grants
+ *  reputation, and may earn a recruit. */
+export async function helpInjured(playerId: string, accept: boolean): Promise<GameSnapshot | null> {
+  const player = await prisma.player.findUnique({ where: { id: playerId }, include: { shelter: true } });
+  if (!player?.shelter || player.state !== "IN_EXPEDITION") return loadSnapshot(playerId);
+  const exp = await prisma.expedition.findFirst({ where: { playerId, status: "ACTIVE" } });
+  const pending = exp?.pending as unknown as EncounterView | null;
+  if (!exp || !pending || pending.kind !== "injured") return loadSnapshot(playerId);
+  let log = ((exp.log as unknown as string[]) ?? []).slice(0, 22);
+
+  if (!accept) {
+    log.unshift(`You leave ${pending.name} to their fate.`);
+    await prisma.expedition.update({ where: { id: exp.id }, data: { log, pending: Prisma.DbNull } });
+    revalidatePath("/");
+    return loadSnapshot(playerId);
+  }
+  if (!(await consumeBackpack(playerId, pending.needDef, 1))) {
+    return loadSnapshot(playerId, `You have no ${pending.needName} to give.`);
+  }
+  const joins = Math.random() < 0.5 && player.shelter.population < player.shelter.popCap;
+  await prisma.player.update({ where: { id: playerId }, data: { reputation: { increment: 5 } } });
+  if (joins) await prisma.shelter.update({ where: { id: player.shelter.id }, data: { population: { increment: 1 }, morale: { increment: 3 } } });
+  log.unshift(`🩹 You patch up ${pending.name}. (+5 reputation)${joins ? ` Grateful, ${pending.name} will head to your shelter.` : ""}`);
   await prisma.expedition.update({ where: { id: exp.id }, data: { log, pending: Prisma.DbNull } });
   revalidatePath("/");
   return loadSnapshot(playerId);

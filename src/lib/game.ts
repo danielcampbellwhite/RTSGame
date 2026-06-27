@@ -4,8 +4,12 @@
 import type { Rng } from "@/lib/rng";
 
 export const SURV = {
-  // Shelter resource depletion per real-world hour (consumed by daily living).
-  depletionPerHour: { food: 3, water: 4, fuel: 1.5 } as Record<string, number>,
+  // Per assigned worker, per real-world hour.
+  jobs: { food: 6, water: 6, scrap: 4, meds: 2 } as Record<string, number>,
+  // Consumed per resident, per real-world hour (more mouths = more drain).
+  consume: { food: 2, water: 2.5 } as Record<string, number>,
+  // The shelter itself burns fuel to stay powered.
+  fuelPerHour: 1.5,
   /** Below this level a resource is "critical" and morale suffers. */
   lowThreshold: 15,
   /** Real seconds of one expedition step's stamina cost. */
@@ -26,29 +30,50 @@ export const SURV = {
 export type ResourceKey = "food" | "water" | "meds" | "ammo" | "scrap" | "fuel";
 export const RESOURCE_KEYS: ResourceKey[] = ["food", "water", "meds", "ammo", "scrap", "fuel"];
 
-export interface ShelterResources {
+export interface ShelterState {
   food: number;
   water: number;
   meds: number;
-  ammo: number;
   scrap: number;
   fuel: number;
   morale: number;
+  population: number;
+  workFood: number;
+  workWater: number;
+  workScrap: number;
+  workMeds: number;
   lastTickAt: Date;
 }
 
-/** Apply passive resource depletion for the elapsed real time. Pure. */
-export function depleteResources<T extends ShelterResources>(s: T, now: Date): T {
+export interface ShelterTick {
+  food: number;
+  water: number;
+  meds: number;
+  scrap: number;
+  fuel: number;
+  morale: number;
+  changed: boolean;
+}
+
+/** Advance the shelter economy over elapsed real time: assigned workers produce
+ *  resources, every resident consumes food/water, and the shelter burns fuel.
+ *  Pure — caller persists the result. */
+export function tickShelter(s: ShelterState, now: Date): ShelterTick {
   const hours = Math.max(0, (now.getTime() - s.lastTickAt.getTime()) / 3_600_000);
-  if (hours <= 0) return s;
-  const food = Math.max(0, s.food - SURV.depletionPerHour.food * hours);
-  const water = Math.max(0, s.water - SURV.depletionPerHour.water * hours);
-  const fuel = Math.max(0, s.fuel - SURV.depletionPerHour.fuel * hours);
-  // Morale drifts toward a target set by how well-stocked the essentials are.
+  const cur = { food: s.food, water: s.water, meds: s.meds, scrap: s.scrap, fuel: s.fuel, morale: s.morale, changed: false };
+  if (hours <= 0) return cur;
+
+  const food = Math.max(0, s.food + (s.workFood * SURV.jobs.food - s.population * SURV.consume.food) * hours);
+  const water = Math.max(0, s.water + (s.workWater * SURV.jobs.water - s.population * SURV.consume.water) * hours);
+  const scrap = s.scrap + s.workScrap * SURV.jobs.scrap * hours;
+  const meds = s.meds + s.workMeds * SURV.jobs.meds * hours;
+  const fuel = Math.max(0, s.fuel - SURV.fuelPerHour * hours);
+
   const lacking = (food < SURV.lowThreshold ? 1 : 0) + (water < SURV.lowThreshold ? 1 : 0);
   const moraleTarget = 90 - lacking * 35;
   const morale = clamp(s.morale + (moraleTarget - s.morale) * Math.min(1, hours * 0.5));
-  return { ...s, food, water, fuel, morale, lastTickAt: now };
+
+  return { food, water, meds, scrap, fuel, morale, changed: true };
 }
 
 export function clamp(v: number, lo = 0, hi = 100): number {

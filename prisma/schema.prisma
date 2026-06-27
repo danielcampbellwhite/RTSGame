@@ -80,6 +80,13 @@ model Shelter {
   population Int @default(1)
   popCap     Int @default(3)
 
+  // Survivors assigned to gather resources (sum must be <= population).
+  // Idle survivors still eat but produce nothing.
+  workFood  Int @default(0)
+  workWater Int @default(0)
+  workScrap Int @default(0)
+  workMeds  Int @default(0)
+
   // Permanently stored survival resources.
   food   Int @default(60)
   water  Int @default(60)

@@ -3,9 +3,10 @@
 import { useState } from "react";
 import { useGame } from "@/store/game";
 import { Btn, Meter, useAction } from "@/components/ui";
-import { startExpedition, equipItem, unequipItem, useConsumable, craft, upgrade } from "@/app/actions";
+import { startExpedition, equipItem, unequipItem, useConsumable, craft, upgrade, assignWork, repairItem } from "@/app/actions";
 import { stationLevelReq } from "@/data/recipes";
-import type { ItemView } from "@/lib/types";
+import { SURV } from "@/lib/game";
+import type { ItemView, ShelterView as ShelterViewT } from "@/lib/types";
 
 const RES: { k: "food" | "water" | "meds" | "ammo" | "scrap" | "fuel"; name: string; icon: string }[] = [
   { k: "food", name: "Food", icon: "🥫" },
@@ -16,7 +17,7 @@ const RES: { k: "food" | "water" | "meds" | "ammo" | "scrap" | "fuel"; name: str
   { k: "fuel", name: "Fuel", icon: "⛽" },
 ];
 
-type Tab = "loadout" | "craft" | "build";
+type Tab = "loadout" | "crew" | "craft" | "build";
 
 const SLOTS: { key: string; label: string }[] = [
   { key: "PRIMARY", label: "Primary" },
@@ -91,13 +92,13 @@ export default function ShelterView() {
 
       {/* Tabs */}
       <div className="flex gap-1">
-        {(["loadout", "craft", "build"] as Tab[]).map((t) => (
+        {(["loadout", "crew", "craft", "build"] as Tab[]).map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
             className={`btn flex-1 rounded py-2 text-[11px] ${tab === t ? "border-[var(--rust)] text-[#ffd9a8]" : ""}`}
           >
-            {t === "loadout" ? "Loadout" : t === "craft" ? "Workbench" : "Build"}
+            {t === "loadout" ? "Loadout" : t === "crew" ? "Crew" : t === "craft" ? "Workbench" : "Build"}
           </button>
         ))}
       </div>
@@ -110,8 +111,12 @@ export default function ShelterView() {
             onEquip={(id) => run(() => equipItem(player.id, id))}
             onUnequip={(id) => run(() => unequipItem(player.id, id))}
             onUse={(id) => run(() => useConsumable(player.id, id))}
+            onRepair={(id) => run(() => repairItem(player.id, id))}
             busy={isPending}
           />
+        )}
+        {tab === "crew" && (
+          <Crew shelter={shelter} onAssign={(job, d) => run(() => assignWork(player.id, job, d))} busy={isPending} />
         )}
         {tab === "craft" && (
           <div className="space-y-1">
@@ -169,18 +174,22 @@ export default function ShelterView() {
 }
 
 function Loadout({
-  equipped, storage, onEquip, onUnequip, onUse, busy,
+  equipped, storage, onEquip, onUnequip, onUse, onRepair, busy,
 }: {
   equipped: Record<string, ItemView | null>;
   storage: ItemView[];
   onEquip: (id: string) => void;
   onUnequip: (id: string) => void;
   onUse: (id: string) => void;
+  onRepair: (id: string) => void;
   busy: boolean;
 }) {
   const gear = storage.filter((i) => i.slot);
   const consumables = storage.filter((i) => i.category === "CONSUMABLE");
   const other = storage.filter((i) => !i.slot && i.category !== "CONSUMABLE");
+  const damaged = [...storage, ...Object.values(equipped).filter((x): x is ItemView => !!x)].filter(
+    (i) => i.durability != null && i.maxDurability != null && i.durability < i.maxDurability
+  );
 
   return (
     <div className="space-y-2">
@@ -216,6 +225,14 @@ function Loadout({
         ))}
       </Section>
 
+      {damaged.length > 0 && (
+        <Section title="Repairs (workshop)">
+          {damaged.map((i) => (
+            <ItemRow key={`rep-${i.id}`} item={i} action="Repair" busy={busy} onAction={() => onRepair(i.id)} />
+          ))}
+        </Section>
+      )}
+
       {other.length > 0 && (
         <Section title="Materials">
           {other.map((i) => (
@@ -223,6 +240,42 @@ function Loadout({
           ))}
         </Section>
       )}
+    </div>
+  );
+}
+
+function Crew({ shelter, onAssign, busy }: { shelter: ShelterViewT; onAssign: (job: "food" | "water" | "scrap" | "meds", d: number) => void; busy: boolean }) {
+  const assigned = shelter.workFood + shelter.workWater + shelter.workScrap + shelter.workMeds;
+  const idle = shelter.population - assigned;
+  const jobs: { key: "food" | "water" | "scrap" | "meds"; label: string; icon: string; count: number }[] = [
+    { key: "food", label: "Farming", icon: "🥫", count: shelter.workFood },
+    { key: "water", label: "Water", icon: "🚰", count: shelter.workWater },
+    { key: "scrap", label: "Scrapping", icon: "🔩", count: shelter.workScrap },
+    { key: "meds", label: "Medicine", icon: "💊", count: shelter.workMeds },
+  ];
+  const netFood = (shelter.workFood * SURV.jobs.food - shelter.population * SURV.consume.food).toFixed(0);
+  const netWater = (shelter.workWater * SURV.jobs.water - shelter.population * SURV.consume.water).toFixed(0);
+  return (
+    <div className="space-y-2">
+      <div className="inset rounded p-2 text-[10px] text-[var(--ink-dim)]">
+        Population <span className="text-[var(--ink)]">{shelter.population}/{shelter.popCap}</span> · Idle{" "}
+        <span className="text-[var(--ink)]">{idle}</span>. Each resident eats; assign survivors to gather. Net food{" "}
+        <span style={{ color: +netFood < 0 ? "var(--blood)" : "var(--good)" }}>{netFood}/hr</span>, water{" "}
+        <span style={{ color: +netWater < 0 ? "var(--blood)" : "var(--good)" }}>{netWater}/hr</span>.
+      </div>
+      {jobs.map((j) => (
+        <div key={j.key} className="inset flex items-center justify-between rounded px-2 py-1.5">
+          <div className="text-xs">
+            {j.icon} {j.label} <span className="text-[var(--ink-dim)]">· +{SURV.jobs[j.key]}/hr each</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <Btn disabled={busy || j.count <= 0} onClick={() => onAssign(j.key, -1)}>−</Btn>
+            <span className="w-4 text-center text-sm">{j.count}</span>
+            <Btn disabled={busy || idle <= 0} onClick={() => onAssign(j.key, 1)}>+</Btn>
+          </div>
+        </div>
+      ))}
+      <p className="text-[10px] text-[var(--ink-dim)]">Recruit survivors in the wasteland, then build Beds to house more.</p>
     </div>
   );
 }
