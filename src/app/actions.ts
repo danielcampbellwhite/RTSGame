@@ -15,7 +15,7 @@ import {
   type PlayerCombat,
 } from "@/lib/game";
 import { mulberry32, hashSeed, randInt, chance, weighted, pick } from "@/lib/rng";
-import { tileAt, lootForTile, enemyForTile, wanderingEnemy, generateLoot, scanAhead, chebyshev, tierForDistance } from "@/lib/wasteland";
+import { tileAt, lootForTile, enemyForTile, wanderingEnemy, generateLoot, chebyshev, tierForDistance } from "@/lib/wasteland";
 import { BIOMES, ENEMIES } from "@/data/world";
 import { sightFor, ambientLine, enemyEntrance, hazardLine, searchNothing, survivorIntro } from "@/data/flavor";
 import { factionAt, FACTIONS, FACTION_KEYS, RIVAL, repOf, standing, type FactionKey, type RepMap } from "@/data/factions";
@@ -669,23 +669,27 @@ export async function interact(playerId: string, kind: "look" | "search" | "rest
   let pending: EncounterView | null = null;
 
   if (kind === "look") {
-    // Reconnaissance: scout a few tiles in each direction so you can plan your
-    // route. Notable sights (loot, threats, survivors, hazards) are spotted and
-    // pinned to the map; the current tile's scavenge potential is assessed.
+    // Inspect only the squares immediately around you (one step in any of the
+    // eight directions). Their contents are revealed and pinned to the map;
+    // the current tile's scavenge potential is assessed.
     log.unshift(`${tile.icon} ${tile.label}. ${sightFor(narr, tile.biome)}`);
 
     const spotted = new Set((exp.spotted as unknown as string[]) ?? []);
-    const RANGE = 3;
-    const reports: string[] = [];
-    for (const [name, dx, dy] of [["north", 0, -1], ["east", 1, 0], ["south", 0, 1], ["west", -1, 0]] as const) {
-      const hits = scanAhead(exp.seed, exp.posX, exp.posY, dx, dy, RANGE);
-      for (const h of hits) spotted.add(`${h.tile.x},${h.tile.y}`);
-      if (hits.length) {
-        const nearest = hits[0];
-        reports.push(`${name}: ${nearest.tile.label} (${nearest.dist} ${nearest.dist === 1 ? "tile" : "tiles"})`);
+    const dirs8 = [
+      ["north", 0, -1], ["north-east", 1, -1], ["east", 1, 0], ["south-east", 1, 1],
+      ["south", 0, 1], ["south-west", -1, 1], ["west", -1, 0], ["north-west", -1, -1],
+    ] as const;
+    const sightings: string[] = [];
+    for (const [name, dx, dy] of dirs8) {
+      const nx = exp.posX + dx, ny = exp.posY + dy;
+      spotted.add(`${nx},${ny}`);
+      if (nx === 0 && ny === 0) sightings.push(`${name}: your shelter`);
+      else {
+        const nt = tileAt(exp.seed, nx, ny);
+        if (NOTABLE_FEATURES.has(nt.feature)) sightings.push(`${name}: ${nt.label}`);
       }
     }
-    log.unshift(reports.length ? `Scouting ahead — ${reports.join("; ")}.` : "The way ahead looks empty in all directions.");
+    log.unshift(sightings.length ? `You scan your surroundings — ${sightings.join("; ")}.` : "Nothing notable in the squares around you.");
 
     const worth = tile.feature === "LOOT" || tile.feature === "CACHE" || tile.biome === "URBAN" || tile.biome === "INDUSTRIAL";
     log.unshift(worth ? "This place looks worth searching." : "Not much here worth digging through.");
