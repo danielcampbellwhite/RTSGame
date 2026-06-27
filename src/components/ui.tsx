@@ -47,7 +47,7 @@ export function Btn({
 export function Meter({ label, value, max, color, critical }: { label: string; value: number; max: number; color: string; critical?: boolean }) {
   const pct = Math.max(0, Math.min(100, (value / max) * 100));
   return (
-    <div className={`text-[10px] ${critical ? "pulse" : ""}`}>
+    <div className={`text-[0.66rem] ${critical ? "pulse" : ""}`}>
       <div className="flex justify-between text-[var(--ink-dim)]">
         <span className="title" style={critical ? { color } : undefined}>{label}</span>
         <span style={{ color }}>{Math.round(value)}{max === 100 ? "" : `/${max}`}</span>

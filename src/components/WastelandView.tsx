@@ -22,11 +22,11 @@ export default function WastelandView() {
     <div className="grime relative flex h-full w-full flex-col gap-2 overflow-y-auto scroll-thin p-2">
       {/* HUD */}
       <div className="panel rounded p-2">
-        <div className="flex items-center justify-between text-[10px]">
+        <div className="flex items-center justify-between text-[0.66rem]">
           <span className="title text-[var(--amber)]" title={exp.conditionNote}>{exp.conditionIcon} {exp.conditionName}</span>
           <span className="text-[var(--ink-dim)]">{exp.biomeName} · {exp.distance} out · T{exp.tier}</span>
         </div>
-        <div className="mt-0.5 text-[9px]">
+        <div className="mt-0.5 text-[0.58rem]">
           <span className="text-[var(--ink-dim)]">Territory: </span>
           {exp.territoryName ? (
             <span>{exp.territoryName} <span className="text-[var(--ink-dim)]">· {exp.territoryStanding}</span></span>
@@ -80,7 +80,7 @@ export default function WastelandView() {
               <div
                 key={`${t.x},${t.y}`}
                 title={t.revealed ? t.label : t.scouted ? "scouted — unknown" : "unexplored"}
-                className={`flex aspect-square items-center justify-center rounded-[2px] text-[12px] ${t.isPlayer ? "ring-2 ring-[var(--amber)]" : ""}`}
+                className={`flex aspect-square items-center justify-center rounded-[2px] text-[0.8rem] ${t.isPlayer ? "ring-2 ring-[var(--amber)]" : ""}`}
                 style={{ background: bg, border, color, opacity }}
               >
                 {content}
@@ -98,7 +98,7 @@ export default function WastelandView() {
               <span className="text-2xl">{exp.pending.icon}</span>
               <div>
                 <div className="text-sm text-[#ffb4b4]">{exp.pending.name}</div>
-                <div className="text-[10px] text-[var(--ink-dim)]">power {exp.pending.power} · hp {exp.pending.hp}/{exp.pending.maxHp}</div>
+                <div className="text-[0.66rem] text-[var(--ink-dim)]">power {exp.pending.power} · hp {exp.pending.hp}/{exp.pending.maxHp}</div>
               </div>
             </div>
             <div className="flex gap-1">
@@ -115,7 +115,7 @@ export default function WastelandView() {
               <span className="text-2xl">🧑</span>
               <div>
                 <div className="text-sm text-[#d8f3a8]">{exp.pending.name}</div>
-                <div className="text-[10px] text-[var(--ink-dim)]">a survivor — recruit to your shelter?</div>
+                <div className="text-[0.66rem] text-[var(--ink-dim)]">a survivor — recruit to your shelter?</div>
               </div>
             </div>
             <div className="flex gap-1">
@@ -131,7 +131,7 @@ export default function WastelandView() {
             <span className="text-sm text-[var(--amber)]">🧑‍🔧 {exp.pending.name} · Trader</span>
             <Btn disabled={isPending} onClick={() => run(() => trade(player.id, { type: "leave" }))}>Leave</Btn>
           </div>
-          <div className="text-[9px] text-[var(--ink-dim)]">pay with 🔩 scrap from your pack (you have {scrap})</div>
+          <div className="text-[0.58rem] text-[var(--ink-dim)]">pay with 🔩 scrap from your pack (you have {scrap})</div>
           <div className="mt-1 grid grid-cols-1 gap-1">
             {exp.pending.offers.map((o, i) => (
               <div key={i} className="inset flex items-center justify-between rounded px-2 py-1 text-xs">
@@ -139,7 +139,7 @@ export default function WastelandView() {
                 <Btn disabled={isPending || scrap < o.price} onClick={() => run(() => trade(player.id, { type: "buy", index: i }))}>{o.price} 🔩</Btn>
               </div>
             ))}
-            {exp.pending.offers.length === 0 && <div className="text-[10px] text-[var(--ink-dim)]">Sold out. Sell from your pack below, or leave.</div>}
+            {exp.pending.offers.length === 0 && <div className="text-[0.66rem] text-[var(--ink-dim)]">Sold out. Sell from your pack below, or leave.</div>}
           </div>
         </div>
       )}
@@ -150,7 +150,7 @@ export default function WastelandView() {
               <span className="text-2xl">🩸</span>
               <div>
                 <div className="text-sm text-[#ffb4b4]">{exp.pending.name}</div>
-                <div className="text-[10px] text-[var(--ink-dim)]">wounded — needs a {exp.pending.needName}</div>
+                <div className="text-[0.66rem] text-[var(--ink-dim)]">wounded — needs a {exp.pending.needName}</div>
               </div>
             </div>
             <div className="flex gap-1">
@@ -164,13 +164,13 @@ export default function WastelandView() {
       {/* Ground — items lying on your current tile */}
       {exp.ground.length > 0 && (
         <div className="panel rounded p-2">
-          <div className="mb-1 flex items-center justify-between text-[10px] text-[var(--ink-dim)]">
+          <div className="mb-1 flex items-center justify-between text-[0.66rem] text-[var(--ink-dim)]">
             <span className="title">🔻 On the ground</span>
             <Btn disabled={blocked} onClick={() => run(() => takeAllGround(player.id))}>Take all</Btn>
           </div>
           <div className="max-h-20 overflow-y-auto scroll-thin">
             {exp.ground.map((g) => (
-              <div key={g.idx} className="flex items-center justify-between py-0.5 text-[11px]">
+              <div key={g.idx} className="flex items-center justify-between py-0.5 text-[0.72rem]">
                 <span className="truncate">{g.icon} {g.name}{g.quantity > 1 ? ` ×${g.quantity}` : ""}{g.durability != null ? ` (dur ${g.durability})` : ""}</span>
                 <button disabled={blocked} className="text-[var(--good)] disabled:opacity-40" onClick={() => run(() => takeGroundItem(player.id, g.idx))}>take</button>
               </div>
@@ -187,7 +187,7 @@ export default function WastelandView() {
           <Btn disabled={blocked} onClick={() => run(() => move(player.id, "N"))}>↑</Btn>
           <Btn disabled={blocked} onClick={() => run(() => move(player.id, "NE"))}>↗</Btn>
           <Btn disabled={blocked} onClick={() => run(() => move(player.id, "W"))}>←</Btn>
-          <div className="flex items-center justify-center text-[9px] text-[var(--ink-dim)]">{player.stamina}⚡</div>
+          <div className="flex items-center justify-center text-[0.58rem] text-[var(--ink-dim)]">{player.stamina}⚡</div>
           <Btn disabled={blocked} onClick={() => run(() => move(player.id, "E"))}>→</Btn>
           <Btn disabled={blocked} onClick={() => run(() => move(player.id, "SW"))}>↙</Btn>
           <Btn disabled={blocked} onClick={() => run(() => move(player.id, "S"))}>↓</Btn>
@@ -196,7 +196,7 @@ export default function WastelandView() {
 
         {/* Pack + actions */}
         <div className="flex flex-1 flex-col gap-1">
-          <div className="inset flex-1 overflow-y-auto scroll-thin rounded p-1 text-[10px]" style={{ maxHeight: 80 }}>
+          <div className="inset flex-1 overflow-y-auto scroll-thin rounded p-1 text-[0.66rem]" style={{ maxHeight: 80 }}>
             <div className="flex items-center justify-between text-[var(--ink-dim)]">
               <span className="title">Pack {exp.backpackUsed}/{exp.carryCap}</span>
               <span>🧨 {ammo}</span>
@@ -331,14 +331,14 @@ function Terminal({ snap, run, disabled }: { snap: GameSnapshot; run: (fn: () =>
 
   return (
     <div className="panel shrink-0 rounded p-2">
-      <div ref={ref} className="h-24 overflow-y-auto scroll-thin pr-1 text-[11px] leading-relaxed">
+      <div ref={ref} className="h-24 overflow-y-auto scroll-thin pr-1 text-[0.72rem] leading-relaxed">
         {feed.map((l, i) => (
           <div key={i} className="text-[var(--ink)]">
             <span className="text-[var(--ink-dim)]">› </span>{l}
           </div>
         ))}
       </div>
-      <div className="mt-1 text-[9px] text-[var(--amber)]">{note}</div>
+      <div className="mt-1 text-[0.58rem] text-[var(--amber)]">{note}</div>
       <div className="mt-1 flex items-center gap-1">
         <span className="text-[var(--tox)]">❯</span>
         <input

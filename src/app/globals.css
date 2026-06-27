@@ -30,9 +30,10 @@ body {
   overscroll-behavior: none;
 }
 
-/* Scale the UI up for readability on phones. */
+/* Global UI scale. Most sizing is rem-based, so this single lever enlarges
+   text, padding and gaps together. Bumped up for readability on phones. */
 html {
-  font-size: 132%;
+  font-size: 150%;
 }
 
 *,

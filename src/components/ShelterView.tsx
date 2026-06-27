@@ -34,7 +34,7 @@ export default function ShelterView() {
   const { player, shelter, storage, equipped, craftables, factions } = snap;
 
   return (
-    <div className="flex h-full w-full flex-col gap-2 overflow-hidden p-2">
+    <div className="flex h-full w-full flex-col gap-2 overflow-y-auto scroll-thin p-2">
       {/* Header banner: the shelter interior, with identity + vitals overlaid */}
       <div
         className="panel relative overflow-hidden rounded"
@@ -48,11 +48,11 @@ export default function ShelterView() {
           <div className="flex items-end justify-between">
             <div>
               <div className="title stamp text-xl font-bold text-[#ffd9a8]">{player.name}</div>
-              <div className="text-[10px] text-[var(--ink)]">
+              <div className="text-[0.66rem] text-[var(--ink)]">
                 Lv {player.level} · {player.xp}/{player.xpToNext} XP · Shelter L{shelter.level} · 👥 {shelter.population}/{shelter.popCap} · Rep {player.reputation}
               </div>
             </div>
-            <div className="title text-[10px] text-[var(--tox)] stamp">◢ SHELTER ◣</div>
+            <div className="title text-[0.66rem] text-[var(--tox)] stamp">◢ SHELTER ◣</div>
           </div>
           <div className="mt-2 grid grid-cols-3 gap-2">
             <Meter label="Health" value={player.health} max={player.maxHealth} color="#b13838" critical={player.health <= player.maxHealth * 0.3} />
@@ -65,7 +65,7 @@ export default function ShelterView() {
       {/* Shelter stores — clearly labelled; these are the PERMANENT stockpile
           (not carried gear) and slowly deplete over time. */}
       <div className="panel rounded p-2">
-        <div className="title mb-1 flex items-center justify-between text-[9px] text-[var(--ink-dim)]">
+        <div className="title mb-1 flex items-center justify-between text-[0.58rem] text-[var(--ink-dim)]">
           <span>Shelter Stores · deplete over time</span>
           <span>Morale {Math.round(shelter.morale)} · Storage {shelter.storedCount}/{shelter.storageCap}</span>
         </div>
@@ -77,7 +77,7 @@ export default function ShelterView() {
               <div key={k} className="inset flex items-center gap-1.5 rounded px-2 py-1">
                 <span className="text-base">{icon}</span>
                 <div className="leading-tight">
-                  <div className="title text-[9px] text-[var(--ink-dim)]">{name}</div>
+                  <div className="title text-[0.58rem] text-[var(--ink-dim)]">{name}</div>
                   <div className="text-sm" style={{ color: low ? "var(--blood)" : "var(--ink)" }}>{Math.round(v)}</div>
                 </div>
               </div>
@@ -85,7 +85,7 @@ export default function ShelterView() {
           })}
         </div>
         {(shelter.food <= 0 || shelter.water <= 0) && (
-          <div className="mt-1 text-center text-[10px] text-[var(--blood)] pulse">
+          <div className="mt-1 text-center text-[0.66rem] text-[var(--blood)] pulse">
             ⚠ {shelter.food <= 0 && shelter.water <= 0 ? "Out of food & water" : shelter.food <= 0 ? "Out of food" : "Out of water"} — morale is collapsing. Scavenge or assign crew.
           </div>
         )}
@@ -101,14 +101,14 @@ export default function ShelterView() {
           <button
             key={t}
             onClick={() => setTab(t)}
-            className={`btn flex-1 rounded py-2 text-[10px] ${tab === t ? "border-[var(--rust)] text-[#ffd9a8]" : ""}`}
+            className={`btn flex-1 rounded py-2 text-[0.66rem] ${tab === t ? "border-[var(--rust)] text-[#ffd9a8]" : ""}`}
           >
             {t === "loadout" ? "Loadout" : t === "crew" ? "Crew" : t === "craft" ? "Craft" : t === "build" ? "Build" : "Factions"}
           </button>
         ))}
       </div>
 
-      <div className="flex-1 overflow-y-auto scroll-thin">
+      <div>
         {tab === "loadout" && (
           <Loadout
             equipped={equipped}
@@ -125,7 +125,7 @@ export default function ShelterView() {
         )}
         {tab === "factions" && (
           <div className="space-y-2">
-            <p className="text-[10px] text-[var(--ink-dim)]">
+            <p className="text-[0.66rem] text-[var(--ink-dim)]">
               Your standing across the wasteland's powers. Help their people to gain favour; kill their fighters and they&apos;ll hunt you.
             </p>
             {factions.map((f) => {
@@ -138,7 +138,7 @@ export default function ShelterView() {
                     <span style={{ color: col }}>{f.standing} ({f.rep > 0 ? "+" : ""}{f.rep})</span>
                   </div>
                   <div className="meter mt-1"><i style={{ width: `${pct}%`, background: col }} /></div>
-                  <div className="mt-1 text-[9px] text-[var(--ink-dim)]">{f.note}</div>
+                  <div className="mt-1 text-[0.58rem] text-[var(--ink-dim)]">{f.note}</div>
                 </div>
               );
             })}
@@ -150,7 +150,7 @@ export default function ShelterView() {
               <div key={c.key} className="inset flex items-center justify-between rounded px-2 py-1.5">
                 <div className="min-w-0">
                   <div className="text-xs">{c.name}</div>
-                  <div className="text-[10px] text-[var(--ink-dim)]">{c.station} · {c.detail}</div>
+                  <div className="text-[0.66rem] text-[var(--ink-dim)]">{c.station} · {c.detail}</div>
                 </div>
                 <Btn disabled={isPending || !c.affordable} onClick={() => run(() => craft(player.id, c.key))}>
                   Craft
@@ -183,7 +183,7 @@ export default function ShelterView() {
                 />
               );
             })}
-            <p className="pt-1 text-[10px] text-[var(--ink-dim)]">
+            <p className="pt-1 text-[0.66rem] text-[var(--ink-dim)]">
               Crafting stations unlock with your survivor rank, then cost scrap &amp; fuel to build/upgrade.
             </p>
           </div>
@@ -231,7 +231,7 @@ function Loadout({
               title={it ? `${it.name} (tap to unequip)` : s.label}
             >
               <span className="text-lg">{it ? it.icon : "·"}</span>
-              <span className="title text-[8px] text-[var(--ink-dim)]">{s.label}</span>
+              <span className="title text-[0.5rem] text-[var(--ink-dim)]">{s.label}</span>
             </button>
           );
         })}
@@ -283,7 +283,7 @@ function Crew({ shelter, onAssign, busy }: { shelter: ShelterViewT; onAssign: (j
   const netWater = (shelter.workWater * SURV.jobs.water - shelter.population * SURV.consume.water).toFixed(0);
   return (
     <div className="space-y-2">
-      <div className="inset rounded p-2 text-[10px] text-[var(--ink-dim)]">
+      <div className="inset rounded p-2 text-[0.66rem] text-[var(--ink-dim)]">
         Population <span className="text-[var(--ink)]">{shelter.population}/{shelter.popCap}</span> · Idle{" "}
         <span className="text-[var(--ink)]">{idle}</span>. Each resident eats; assign survivors to gather. Net food{" "}
         <span style={{ color: +netFood < 0 ? "var(--blood)" : "var(--good)" }}>{netFood}/hr</span>, water{" "}
@@ -301,7 +301,7 @@ function Crew({ shelter, onAssign, busy }: { shelter: ShelterViewT; onAssign: (j
           </div>
         </div>
       ))}
-      <p className="text-[10px] text-[var(--ink-dim)]">Recruit survivors in the wasteland, then build Beds to house more.</p>
+      <p className="text-[0.66rem] text-[var(--ink-dim)]">Recruit survivors in the wasteland, then build Beds to house more.</p>
     </div>
   );
 }
@@ -316,7 +316,7 @@ export function ItemRow({ item, action, onAction, busy }: { item: ItemView; acti
             {item.name}
             {item.quantity > 1 && <span className="text-[var(--ink-dim)]"> ×{item.quantity}</span>}
           </div>
-          <div className="text-[9px] text-[var(--ink-dim)]">
+          <div className="text-[0.58rem] text-[var(--ink-dim)]">
             {item.durability != null && item.maxDurability ? `dur ${item.durability}/${item.maxDurability}` : item.category.toLowerCase()}
           </div>
         </div>
@@ -331,14 +331,14 @@ export function ItemRow({ item, action, onAction, busy }: { item: ItemView; acti
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div>
-      <div className="title mb-1 text-[10px] text-[var(--ink-dim)]">{title}</div>
+      <div className="title mb-1 text-[0.66rem] text-[var(--ink-dim)]">{title}</div>
       <div className="space-y-1">{children}</div>
     </div>
   );
 }
 
 function Empty({ children }: { children: React.ReactNode }) {
-  return <div className="px-1 py-2 text-[10px] text-[var(--ink-dim)]">{children}</div>;
+  return <div className="px-1 py-2 text-[0.66rem] text-[var(--ink-dim)]">{children}</div>;
 }
 
 function UpgradeRow({ label, note, onClick, busy, locked }: { label: string; note: string; onClick: () => void; busy: boolean; locked?: boolean }) {
@@ -346,7 +346,7 @@ function UpgradeRow({ label, note, onClick, busy, locked }: { label: string; not
     <div className="inset flex items-center justify-between rounded px-2 py-1.5">
       <div>
         <div>{label}</div>
-        <div className="text-[10px]" style={{ color: locked ? "var(--blood)" : "var(--ink-dim)" }}>{note}</div>
+        <div className="text-[0.66rem]" style={{ color: locked ? "var(--blood)" : "var(--ink-dim)" }}>{note}</div>
       </div>
       <Btn disabled={busy || locked} onClick={onClick}>{locked ? "Locked" : "Upgrade"}</Btn>
     </div>
@@ -357,7 +357,7 @@ function SaveCode({ id }: { id: string }) {
   const [copied, setCopied] = useState(false);
   return (
     <button
-      className="text-center text-[9px] text-[var(--ink-dim)] hover:text-[var(--ink)]"
+      className="text-center text-[0.58rem] text-[var(--ink-dim)] hover:text-[var(--ink)]"
       onClick={() => {
         navigator.clipboard?.writeText(id).then(() => {
           setCopied(true);

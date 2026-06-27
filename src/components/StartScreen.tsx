@@ -43,7 +43,7 @@ export default function StartScreen() {
       </div>
 
       <div className="panel w-full max-w-xs rounded p-4">
-        <label className="title text-[10px] text-[var(--ink-dim)]">Survivor name</label>
+        <label className="title text-[0.66rem] text-[var(--ink-dim)]">Survivor name</label>
         <input
           autoFocus
           value={name}
@@ -59,7 +59,7 @@ export default function StartScreen() {
       </div>
 
       <div className="w-full max-w-xs">
-        <div className="title mb-1 text-center text-[10px] text-[var(--ink-dim)]">Resume a save</div>
+        <div className="title mb-1 text-center text-[0.66rem] text-[var(--ink-dim)]">Resume a save</div>
         <div className="flex gap-1">
           <input
             value={code}
