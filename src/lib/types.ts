@@ -21,6 +21,8 @@ export interface TileView {
   x: number;
   y: number;
   revealed: boolean; // entered — contents known
+  visited?: boolean; // part of your trail
+  spotted?: boolean; // seen from afar via look — contents known, not entered
   scouted?: boolean; // adjacent — terrain visible, contents hidden
   icon?: string;
   label?: string;
@@ -30,7 +32,7 @@ export interface TileView {
   isExit?: boolean;
 }
 
-export interface EncounterView {
+export interface EnemyEncounter {
   kind: "enemy";
   enemyKey: string;
   name: string;
@@ -39,6 +41,14 @@ export interface EncounterView {
   hp: number;
   maxHp: number;
 }
+
+export interface SurvivorEncounter {
+  kind: "survivor";
+  name: string;
+  icon: string;
+}
+
+export type EncounterView = EnemyEncounter | SurvivorEncounter;
 
 export interface ExpeditionView {
   id: string;
@@ -62,6 +72,8 @@ export interface ExpeditionView {
 
 export interface ShelterView {
   level: number;
+  population: number;
+  popCap: number;
   food: number;
   water: number;
   meds: number;

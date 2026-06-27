@@ -75,6 +75,11 @@ model Shelter {
 
   level Int @default(1)
 
+  // Survivors living in the shelter (starts at 1 — just you). Recruiting from
+  // the wasteland raises population up to popCap; upgrade beds to raise the cap.
+  population Int @default(1)
+  popCap     Int @default(3)
+
   // Permanently stored survival resources.
   food   Int @default(60)
   water  Int @default(60)
@@ -126,7 +131,8 @@ model Expedition {
   posY     Int @default(0)
   distance Int @default(0) // Chebyshev distance from exit -> risk/reward scaling
 
-  visited Json  @default("[]") // explored tile keys "x,y" (fog of war)
+  visited Json  @default("[]") // entered tile keys "x,y" (your trail)
+  spotted Json  @default("[]") // tiles seen from afar via `look` (not entered)
   log     Json  @default("[]") // recent event log entries
   pending Json? // an encounter on the current tile awaiting the player's choice
 

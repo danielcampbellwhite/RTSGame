@@ -81,6 +81,24 @@ const SEARCH_NOTHING: string[] = [
   "Just dust, rust, and disappointment.",
 ];
 
+const SURVIVOR_NAMES = [
+  "Mara", "Cole", "Dove", "Rook", "Sasha", "Tobias", "Lena", "Hatch", "Wren", "Diaz",
+  "Pike", "Nessa", "Juno", "Gareth", "Sable", "Otis", "Vera", "Bishop", "Echo", "Marlow",
+];
+const SURVIVOR_INTRO = [
+  "{n}, a wary survivor, raises empty hands — \"I'm not looking for trouble.\"",
+  "A gaunt figure named {n} steps out, eyeing your gear. \"You got a safe place?\"",
+  "{n} lowers a rusted pistol when they see you're human. \"Thank god. You alone?\"",
+  "Huddled by a fire, {n} looks up. \"Room for one more wherever you're headed?\"",
+];
+
+export function survivorName(rng: Rng): string {
+  return pick(rng, SURVIVOR_NAMES);
+}
+export function survivorIntro(rng: Rng, name: string): string {
+  return pick(rng, SURVIVOR_INTRO).replace("{n}", name);
+}
+
 export function sightFor(rng: Rng, biome: Biome): string {
   return pick(rng, AMBIANCE[biome]);
 }

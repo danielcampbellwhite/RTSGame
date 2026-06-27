@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useGame } from "@/store/game";
 import { Btn, Meter, useAction } from "@/components/ui";
-import { move, resolveEncounter, returnHome, useConsumable, interact, type Dir } from "@/app/actions";
+import { move, resolveEncounter, returnHome, useConsumable, interact, recruitSurvivor, type Dir } from "@/app/actions";
 import type { GameSnapshot } from "@/lib/types";
 
 export default function WastelandView() {
@@ -38,10 +38,24 @@ export default function WastelandView() {
             let bg = "transparent";
             let border = "1px solid rgba(255,255,255,0.04)";
             let content = "";
+            let opacity = 1;
+            let color: string | undefined;
             if (t.isPlayer) {
-              bg = "rgba(58,47,35,0.85)";
+              bg = "rgba(58,47,35,0.9)";
               border = "1px solid var(--amber)";
               content = "🧍";
+            } else if (t.visited) {
+              // your trail — explored ground
+              bg = "rgba(58,47,35,0.45)";
+              border = "1px solid rgba(224,163,46,0.25)";
+              content = t.feature === "EMPTY" ? "·" : t.icon ?? "";
+              if (t.feature === "EMPTY") color = "rgba(224,163,46,0.4)";
+            } else if (t.spotted) {
+              // seen from afar via look
+              bg = mix(t.color ?? "#2a241d", 0.3);
+              border = "1px dashed rgba(224,163,46,0.4)";
+              content = t.feature === "EMPTY" ? "" : t.icon ?? "";
+              opacity = 0.7;
             } else if (t.revealed) {
               bg = mix(t.color ?? "#2a241d", 0.5);
               content = t.feature === "EMPTY" ? "" : t.icon ?? "";
@@ -50,13 +64,14 @@ export default function WastelandView() {
               bg = mix(t.color ?? "#2a241d", 0.16);
               border = "1px dashed rgba(255,255,255,0.12)";
               content = "·";
+              color = "rgba(232,221,203,0.3)";
             }
             return (
               <div
                 key={`${t.x},${t.y}`}
                 title={t.revealed ? t.label : t.scouted ? "scouted — unknown" : "unexplored"}
                 className={`flex aspect-square items-center justify-center rounded-[2px] text-[12px] ${t.isPlayer ? "ring-2 ring-[var(--amber)]" : ""}`}
-                style={{ background: bg, border, color: t.scouted ? "rgba(232,221,203,0.3)" : undefined }}
+                style={{ background: bg, border, color, opacity }}
               >
                 {content}
               </div>
@@ -66,7 +81,7 @@ export default function WastelandView() {
       </div>
 
       {/* Encounter card */}
-      {exp.pending && (
+      {exp.pending && exp.pending.kind === "enemy" && (
         <div className="panel rounded p-2" style={{ borderColor: "var(--blood)" }}>
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
@@ -79,6 +94,23 @@ export default function WastelandView() {
             <div className="flex gap-1">
               <Btn variant="danger" disabled={isPending} onClick={() => run(() => resolveEncounter(player.id, "fight"))}>Fight</Btn>
               <Btn disabled={isPending} onClick={() => run(() => resolveEncounter(player.id, "flee"))}>Flee</Btn>
+            </div>
+          </div>
+        </div>
+      )}
+      {exp.pending && exp.pending.kind === "survivor" && (
+        <div className="panel rounded p-2" style={{ borderColor: "var(--tox)" }}>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className="text-2xl">🧑</span>
+              <div>
+                <div className="text-sm text-[#d8f3a8]">{exp.pending.name}</div>
+                <div className="text-[10px] text-[var(--ink-dim)]">a survivor — recruit to your shelter?</div>
+              </div>
+            </div>
+            <div className="flex gap-1">
+              <Btn variant="go" disabled={isPending} onClick={() => run(() => recruitSurvivor(player.id, true))}>Recruit</Btn>
+              <Btn disabled={isPending} onClick={() => run(() => recruitSurvivor(player.id, false))}>Move On</Btn>
             </div>
           </div>
         </div>
@@ -171,11 +203,17 @@ function Terminal({ snap, run, disabled }: { snap: GameSnapshot; run: (fn: () =>
       if (exp.pending) return setNote("Something blocks your path — fight or flee.");
       run(() => move(player.id, MOVE_WORDS[verb] ?? MOVE_WORDS[arg]));
     } else if (["f", "fight", "attack"].includes(verb)) {
-      if (!exp.pending) return setNote("Nothing to fight here.");
+      if (exp.pending?.kind !== "enemy") return setNote("Nothing to fight here.");
       run(() => resolveEncounter(player.id, "fight"));
     } else if (["flee", "run", "escape"].includes(verb)) {
-      if (!exp.pending) return setNote("Nothing to flee from.");
+      if (exp.pending?.kind !== "enemy") return setNote("Nothing to flee from.");
       run(() => resolveEncounter(player.id, "flee"));
+    } else if (["recruit", "invite"].includes(verb)) {
+      if (exp.pending?.kind !== "survivor") return setNote("No survivor here to recruit.");
+      run(() => recruitSurvivor(player.id, true));
+    } else if (["ignore", "wave", "dismiss"].includes(verb)) {
+      if (exp.pending?.kind !== "survivor") return setNote("No one to wave off.");
+      run(() => recruitSurvivor(player.id, false));
     } else if (["r", "return", "home", "leave"].includes(verb)) {
       if (exp.pending) return setNote("Can't leave mid-fight.");
       run(() => returnHome(player.id));
@@ -193,7 +231,7 @@ function Terminal({ snap, run, disabled }: { snap: GameSnapshot; run: (fn: () =>
       if (!item) return setNote("No matching consumable in your pack.");
       run(() => useConsumable(player.id, item.id));
     } else if (verb === "help") {
-      setNote("move: n s e w ne nw se sw · fight · flee · search · rest · look · use [item] · return");
+      setNote("move: n s e w ne nw se sw · fight · flee · recruit · ignore · search · rest · look · use [item] · return");
     } else {
       setNote(`Unknown command: ${verb}`);
     }

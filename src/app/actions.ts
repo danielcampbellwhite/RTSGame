@@ -15,9 +15,22 @@ import {
   type PlayerCombat,
 } from "@/lib/game";
 import { mulberry32, hashSeed, randInt, chance } from "@/lib/rng";
-import { tileAt, lootForTile, enemyForTile, wanderingEnemy, generateLoot, chebyshev, tierForDistance } from "@/lib/wasteland";
+import { tileAt, lootForTile, enemyForTile, wanderingEnemy, generateLoot, scanAhead, chebyshev, tierForDistance } from "@/lib/wasteland";
 import { BIOMES } from "@/data/world";
-import { sightFor, ambientLine, enemyEntrance, hazardLine, searchNothing } from "@/data/flavor";
+import { sightFor, ambientLine, enemyEntrance, hazardLine, searchNothing, survivorIntro } from "@/data/flavor";
+
+const NOTABLE_FEATURES = new Set(["LOOT", "ENEMY", "HAZARD", "SURVIVOR"]);
+
+/** Brief readout of notable things in the 4 adjacent tiles. */
+function surroundings(seed: number, x: number, y: number): string {
+  const dirs = [["north", 0, -1], ["east", 1, 0], ["south", 0, 1], ["west", -1, 0]] as const;
+  const parts: string[] = [];
+  for (const [name, dx, dy] of dirs) {
+    const t = tileAt(seed, x + dx, y + dy);
+    if (NOTABLE_FEATURES.has(t.feature)) parts.push(`${t.label} to the ${name}`);
+  }
+  return parts.join("; ");
+}
 import type {
   GameSnapshot,
   ItemView,
@@ -150,9 +163,11 @@ async function loadSnapshot(playerId: string, flash: string | null = null): Prom
   if (player.state === "IN_EXPEDITION") {
     const exp = await prisma.expedition.findFirst({ where: { playerId, status: "ACTIVE" } });
     if (exp) {
-      // Entered tiles show their contents. Adjacent tiles are only "scouted":
-      // you can see the terrain you could step into, but not what's there yet.
+      // Entered tiles (your trail) and tiles seen from afar via `look` show
+      // their contents. Adjacent tiles are only "scouted" — terrain visible,
+      // contents hidden until you step in.
       const visited = new Set((exp.visited as unknown as string[]) ?? []);
+      const spotted = new Set((exp.spotted as unknown as string[]) ?? []);
       const scouted = new Set<string>();
       for (const [dx, dy] of [[0, -1], [0, 1], [-1, 0], [1, 0]]) scouted.add(`${exp.posX + dx},${exp.posY + dy}`);
 
@@ -163,17 +178,21 @@ async function loadSnapshot(playerId: string, flash: string | null = null): Prom
           const y = exp.posY + dy;
           const key = `${x},${y}`;
           const isExit = x === 0 && y === 0;
+          const isPlayer = dx === 0 && dy === 0;
           const t = tileAt(exp.seed, x, y);
-          if (visited.has(key) || isExit) {
+          if (visited.has(key) || isExit || isPlayer) {
             tiles.push({
-              x, y, revealed: true,
+              x, y, revealed: true, visited: visited.has(key) && !isPlayer,
               icon: t.icon, label: t.label, feature: t.feature,
-              color: BIOMES[t.biome].color,
-              isPlayer: dx === 0 && dy === 0,
-              isExit,
+              color: BIOMES[t.biome].color, isPlayer, isExit,
+            });
+          } else if (spotted.has(key)) {
+            tiles.push({
+              x, y, revealed: true, spotted: true,
+              icon: t.icon, label: t.label, feature: t.feature,
+              color: BIOMES[t.biome].color, isExit,
             });
           } else if (scouted.has(key)) {
-            // terrain tint only — contents hidden
             tiles.push({ x, y, revealed: false, scouted: true, color: BIOMES[t.biome].color, isExit });
           } else {
             tiles.push({ x, y, revealed: false, isExit });
@@ -221,6 +240,8 @@ async function loadSnapshot(playerId: string, flash: string | null = null): Prom
     },
     shelter: {
       level: sh.level,
+      population: sh.population,
+      popCap: sh.popCap,
       food: Math.round(fresh.food),
       water: Math.round(fresh.water),
       meds: sh.meds,
@@ -326,14 +347,19 @@ export async function craft(playerId: string, recipeKey: string): Promise<GameSn
   return loadSnapshot(playerId, `Crafted ${recipe.name}.`);
 }
 
-export async function upgrade(playerId: string, target: Station | "storage" | "shelter"): Promise<GameSnapshot | null> {
+export async function upgrade(playerId: string, target: Station | "storage" | "shelter" | "beds"): Promise<GameSnapshot | null> {
   const player = await prisma.player.findUnique({ where: { id: playerId }, include: { shelter: true } });
   if (!player?.shelter || player.state !== "AT_SHELTER") return loadSnapshot(playerId);
   const sh = player.shelter;
 
-  const field = target === "storage" || target === "shelter" ? null : (`${target}Lvl` as const);
+  const nonStation = target === "storage" || target === "shelter" || target === "beds";
+  const field = nonStation ? null : (`${target}Lvl` as const);
   const isStation = field !== null;
-  const curLevel = target === "shelter" ? sh.level : target === "storage" ? Math.floor((sh.storageCap - 240) / 60) + 1 : (sh as unknown as Record<string, number>)[field!] ?? 0;
+  const curLevel =
+    target === "shelter" ? sh.level :
+    target === "storage" ? Math.floor((sh.storageCap - 240) / 60) + 1 :
+    target === "beds" ? Math.floor((sh.popCap - 3) / 2) + 1 :
+    (sh as unknown as Record<string, number>)[field!] ?? 0;
 
   // Crafting stations are locked behind survivor rank — scavenge first, build later.
   if (isStation) {
@@ -346,6 +372,7 @@ export async function upgrade(playerId: string, target: Station | "storage" | "s
 
   const data: Record<string, unknown> = { scrap: { decrement: cost.scrap }, fuel: { decrement: cost.fuel } };
   if (target === "storage") data.storageCap = { increment: 60 };
+  else if (target === "beds") data.popCap = { increment: 2 };
   else if (target === "shelter") {
     data.level = { increment: 1 };
     data.morale = { increment: 5 };
@@ -414,6 +441,10 @@ export async function move(playerId: string, dir: Dir): Promise<GameSnapshot | n
       const e = enemyForTile(tile)!;
       pending = { kind: "enemy", enemyKey: e.key, name: e.name, icon: e.icon, power: e.power, hp: e.power, maxHp: e.power };
       entry.push(`${e.icon} ${enemyEntrance(narr, e.name)}`);
+    } else if (firstVisit && tile.feature === "SURVIVOR") {
+      const name = tile.survivorName ?? "a stranger";
+      pending = { kind: "survivor", name, icon: "🧑" };
+      entry.push(`🧑 ${survivorIntro(narr, name)}`);
     } else if (firstVisit && (tile.feature === "LOOT" || tile.feature === "CACHE")) {
       const drops = lootForTile(exp.seed, tile);
       const added = await addLootToBackpack(playerId, drops);
@@ -424,6 +455,11 @@ export async function move(playerId: string, dir: Dir): Promise<GameSnapshot | n
       entry.push(`${tile.icon} ${hazardLine(narr, tile.hazard!)} (+${dose} rad)`);
     } else if (!firstVisit) {
       entry.push("Your own tracks cross this ground. Nothing new stirs.");
+    }
+    // What's immediately around you — so you can pick your next step.
+    if (!pending) {
+      const near = surroundings(exp.seed, x, y);
+      if (near) entry.push(`Nearby: ${near}.`);
     }
   }
 
@@ -469,15 +505,28 @@ export async function interact(playerId: string, kind: "look" | "search" | "rest
   let pending: EncounterView | null = null;
 
   if (kind === "look") {
-    // Free reconnaissance: describe where you stand and the terrain around you
-    // (terrain only — you still won't know what's in a tile until you enter it).
+    // Reconnaissance: scout a few tiles in each direction so you can plan your
+    // route. Notable sights (loot, threats, survivors, hazards) are spotted and
+    // pinned to the map; the current tile's scavenge potential is assessed.
     log.unshift(`${tile.icon} ${tile.label}. ${sightFor(narr, tile.biome)}`);
-    const around = ([["N", 0, -1], ["E", 1, 0], ["S", 0, 1], ["W", -1, 0]] as const).map(([name, dx, dy]) => {
-      const nx = exp.posX + dx, ny = exp.posY + dy;
-      const exit = nx === 0 && ny === 0 ? " (shelter!)" : "";
-      return `${name} ${BIOMES[tileAt(exp.seed, nx, ny).biome].name}${exit}`;
-    });
-    log.unshift(`You scan the horizon — ${around.join(" · ")}.`);
+
+    const spotted = new Set((exp.spotted as unknown as string[]) ?? []);
+    const RANGE = 3;
+    const reports: string[] = [];
+    for (const [name, dx, dy] of [["north", 0, -1], ["east", 1, 0], ["south", 0, 1], ["west", -1, 0]] as const) {
+      const hits = scanAhead(exp.seed, exp.posX, exp.posY, dx, dy, RANGE);
+      for (const h of hits) spotted.add(`${h.tile.x},${h.tile.y}`);
+      if (hits.length) {
+        const nearest = hits[0];
+        reports.push(`${name}: ${nearest.tile.label} (${nearest.dist} ${nearest.dist === 1 ? "tile" : "tiles"})`);
+      }
+    }
+    log.unshift(reports.length ? `Scouting ahead — ${reports.join("; ")}.` : "The way ahead looks empty in all directions.");
+
+    const worth = tile.feature === "LOOT" || tile.feature === "CACHE" || tile.biome === "URBAN" || tile.biome === "INDUSTRIAL";
+    log.unshift(worth ? "This place looks worth searching." : "Not much here worth digging through.");
+
+    await prisma.expedition.update({ where: { id: exp.id }, data: { spotted: [...spotted] } });
   } else if (kind === "rest") {
     stamina = clamp(stamina + 30);
     log.unshift("You find cover, slow your breathing, and recover. (+stamina)");
@@ -515,7 +564,7 @@ export async function resolveEncounter(playerId: string, choice: "fight" | "flee
   if (!player || player.state !== "IN_EXPEDITION") return loadSnapshot(playerId);
   const exp = await prisma.expedition.findFirst({ where: { playerId, status: "ACTIVE" } });
   const pending = exp?.pending as unknown as EncounterView | null;
-  if (!exp || !pending) return loadSnapshot(playerId);
+  if (!exp || !pending || pending.kind !== "enemy") return loadSnapshot(playerId);
 
   const items = (await prisma.itemStack.findMany({ where: { playerId } })) as StackRow[];
   const equipped = items.filter((i) => i.equippedSlot);
@@ -576,6 +625,28 @@ export async function resolveEncounter(playerId: string, choice: "fight" | "flee
 
   await prisma.expedition.update({ where: { id: exp.id }, data: { log, pending: newPending ? (newPending as unknown as Prisma.InputJsonValue) : Prisma.DbNull } });
   await prisma.player.update({ where: { id: playerId }, data: { health, stamina, xp, level, maxHealth: 100 + (level - 1) * 10 } });
+  revalidatePath("/");
+  return loadSnapshot(playerId);
+}
+
+/** Respond to a survivor encounter: invite them to the shelter, or move on. */
+export async function recruitSurvivor(playerId: string, accept: boolean): Promise<GameSnapshot | null> {
+  const player = await prisma.player.findUnique({ where: { id: playerId }, include: { shelter: true } });
+  if (!player?.shelter || player.state !== "IN_EXPEDITION") return loadSnapshot(playerId);
+  const exp = await prisma.expedition.findFirst({ where: { playerId, status: "ACTIVE" } });
+  const pending = exp?.pending as unknown as EncounterView | null;
+  if (!exp || !pending || pending.kind !== "survivor") return loadSnapshot(playerId);
+
+  const log = ((exp.log as unknown as string[]) ?? []).slice(0, 22);
+  if (!accept) {
+    log.unshift(`You wish ${pending.name} luck and move on.`);
+  } else if (player.shelter.population >= player.shelter.popCap) {
+    log.unshift(`${pending.name} would join you, but the shelter is full (${player.shelter.population}/${player.shelter.popCap}). Build more beds.`);
+  } else {
+    await prisma.shelter.update({ where: { id: player.shelter.id }, data: { population: { increment: 1 }, morale: { increment: 3 } } });
+    log.unshift(`🤝 ${pending.name} will make their way to your shelter. Population +1.`);
+  }
+  await prisma.expedition.update({ where: { id: exp.id }, data: { log, pending: Prisma.DbNull } });
   revalidatePath("/");
   return loadSnapshot(playerId);
 }

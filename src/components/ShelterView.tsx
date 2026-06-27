@@ -34,21 +34,30 @@ export default function ShelterView() {
 
   return (
     <div className="flex h-full w-full flex-col gap-2 overflow-hidden p-2">
-      {/* Header: identity + vitals */}
-      <div className="panel rounded p-3">
-        <div className="flex items-start justify-between">
-          <div>
-            <div className="title stamp text-lg font-bold text-[var(--rust)]">{player.name}</div>
-            <div className="text-[10px] text-[var(--ink-dim)]">
-              Lv {player.level} · {player.xp}/{player.xpToNext} XP · Shelter L{shelter.level} · Rep {player.reputation}
+      {/* Header banner: the shelter interior, with identity + vitals overlaid */}
+      <div
+        className="panel relative overflow-hidden rounded"
+        style={{
+          backgroundImage: "linear-gradient(180deg, rgba(12,10,8,0.25) 0%, rgba(12,10,8,0.55) 45%, rgba(12,10,8,0.94) 100%), url('/shelter.png')",
+          backgroundSize: "cover",
+          backgroundPosition: "center 32%",
+        }}
+      >
+        <div className="p-3 pt-20">
+          <div className="flex items-end justify-between">
+            <div>
+              <div className="title stamp text-xl font-bold text-[#ffd9a8]">{player.name}</div>
+              <div className="text-[10px] text-[var(--ink)]">
+                Lv {player.level} · {player.xp}/{player.xpToNext} XP · Shelter L{shelter.level} · 👥 {shelter.population}/{shelter.popCap} · Rep {player.reputation}
+              </div>
             </div>
+            <div className="title text-[10px] text-[var(--tox)] stamp">◢ SHELTER ◣</div>
           </div>
-          <div className="title text-[10px] text-[var(--tox)]">◢ SHELTER ◣</div>
-        </div>
-        <div className="mt-2 grid grid-cols-3 gap-2">
-          <Meter label="Health" value={player.health} max={player.maxHealth} color="#b13838" />
-          <Meter label="Stamina" value={player.stamina} max={100} color="#e0a32e" />
-          <Meter label="Radiation" value={player.radiation} max={100} color="#8fbf3f" />
+          <div className="mt-2 grid grid-cols-3 gap-2">
+            <Meter label="Health" value={player.health} max={player.maxHealth} color="#b13838" />
+            <Meter label="Stamina" value={player.stamina} max={100} color="#e0a32e" />
+            <Meter label="Radiation" value={player.radiation} max={100} color="#8fbf3f" />
+          </div>
         </div>
       </div>
 
@@ -122,6 +131,7 @@ export default function ShelterView() {
         {tab === "build" && (
           <div className="space-y-1 text-xs">
             <UpgradeRow label="Storage (+60 cap)" onClick={() => run(() => upgrade(player.id, "storage"))} busy={isPending} note={`cap ${shelter.storageCap}`} />
+            <UpgradeRow label="Beds (+2 population)" onClick={() => run(() => upgrade(player.id, "beds"))} busy={isPending} note={`pop ${shelter.population}/${shelter.popCap}`} />
             <UpgradeRow label="Shelter level" onClick={() => run(() => upgrade(player.id, "shelter"))} busy={isPending} note={`L${shelter.level}`} />
             {([
               { label: "Workshop", t: "workshop" as const, lvl: shelter.workshopLvl },

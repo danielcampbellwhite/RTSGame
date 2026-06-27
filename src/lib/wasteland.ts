@@ -5,8 +5,9 @@
 import { tileRng, mulberry32, hashSeed, randInt, weighted, pick, chance, type Rng } from "@/lib/rng";
 import { ITEM_DEFS } from "@/data/items";
 import { BIOMES, LOCATIONS, LOCATION_KEYS, ENEMIES, ENEMY_KEYS, type Biome, type HazardKind, type LootTable } from "@/data/world";
+import { survivorName } from "@/data/flavor";
 
-export type FeatureKind = "EXIT" | "EMPTY" | "LOOT" | "ENEMY" | "HAZARD" | "CACHE";
+export type FeatureKind = "EXIT" | "EMPTY" | "LOOT" | "ENEMY" | "HAZARD" | "CACHE" | "SURVIVOR";
 
 export interface LootDrop {
   defKey: string;
@@ -23,9 +24,13 @@ export interface Tile {
   locationKey?: string;
   enemyKey?: string;
   hazard?: HazardKind;
+  survivorName?: string;
   icon: string;
   label: string;
 }
+
+/** Features worth spotting from a distance (via `look`). */
+const NOTABLE: FeatureKind[] = ["LOOT", "ENEMY", "HAZARD", "SURVIVOR"];
 
 export const MAX_TIER = 5;
 
@@ -69,6 +74,7 @@ export function tileAt(seed: number, x: number, y: number): Tile {
     ["ENEMY", 10 + tier * 5],
     ["HAZARD", biome === "IRRADIATED" ? 10 + tier * 3 : 3 + tier],
     ["CACHE", 4],
+    ["SURVIVOR", 4],
   ]);
 
   if (feature === "LOOT") {
@@ -89,7 +95,22 @@ export function tileAt(seed: number, x: number, y: number): Tile {
   if (feature === "CACHE") {
     return { x, y, biome, tier, feature, icon: "📦", label: "Hidden Cache" };
   }
+  if (feature === "SURVIVOR") {
+    const name = survivorName(rng);
+    return { x, y, biome, tier, feature, survivorName: name, icon: "🧑", label: `Survivor (${name})` };
+  }
   return { x, y, biome, tier, feature: "EMPTY", icon: BIOMES[biome].char, label: BIOMES[biome].name };
+}
+
+/** Notable tiles along a direction within `range`, nearest first — used by
+ *  `look` to let the player scout what lies ahead before committing. */
+export function scanAhead(seed: number, x: number, y: number, dx: number, dy: number, range: number): { dist: number; tile: Tile }[] {
+  const hits: { dist: number; tile: Tile }[] = [];
+  for (let i = 1; i <= range; i++) {
+    const t = tileAt(seed, x + dx * i, y + dy * i);
+    if (NOTABLE.includes(t.feature)) hits.push({ dist: i, tile: t });
+  }
+  return hits;
 }
 
 /** Draw loot from a table, gated by tier; quantities scale with tier. */
