@@ -16,7 +16,7 @@ import {
 } from "@/lib/game";
 import { mulberry32, hashSeed, randInt, chance, weighted, pick } from "@/lib/rng";
 import { tileAt, lootForTile, enemyForTile, wanderingEnemy, generateLoot, scanAhead, chebyshev, tierForDistance } from "@/lib/wasteland";
-import { BIOMES } from "@/data/world";
+import { BIOMES, ENEMIES } from "@/data/world";
 import { sightFor, ambientLine, enemyEntrance, hazardLine, searchNothing, survivorIntro } from "@/data/flavor";
 import { factionAt, FACTIONS, FACTION_KEYS, RIVAL, repOf, standing, type FactionKey, type RepMap } from "@/data/factions";
 import { CONDITIONS, rollCondition, type Condition } from "@/data/conditions";
@@ -528,6 +528,7 @@ export async function move(playerId: string, dir: Dir): Promise<GameSnapshot | n
   const y = exp.posY + dy;
   const key = `${x},${y}`;
   const visited = new Set((exp.visited as unknown as string[]) ?? []);
+  const cleared = new Set((exp.cleared as unknown as string[]) ?? []);
   const firstVisit = !visited.has(key);
   visited.add(key);
   let log = ((exp.log as unknown as string[]) ?? []).slice(0, 18);
@@ -562,18 +563,31 @@ export async function move(playerId: string, dir: Dir): Promise<GameSnapshot | n
         pending = { kind: "enemy", enemyKey: e.key, name, icon: elite ? "☠️" : e.icon, power, hp: power, maxHp: power, faction: faction ?? null, elite };
         entry.push(`${pending.icon} ${enemyEntrance(narr, name)}${factionTag}`);
       }
-    } else if (firstVisit && tile.feature === "SURVIVOR") {
+    } else if (tile.feature === "SURVIVOR" && !cleared.has(key)) {
+      // NPC identity is deterministic per tile, so a survivor you couldn't help
+      // is the *same* person when you return with supplies.
       const name = tile.survivorName ?? "a stranger";
+      const npcRng = mulberry32(hashSeed(exp.seed, x, y, 909));
       const traderW = cond === "CARAVAN" ? 6 : 3;
-      const sub = weighted(narr, [["recruit", 5], ["trader", traderW], ["injured", 2]]);
-      if (sub === "trader") {
+      const sub = weighted(npcRng, [["recruit", 5], ["trader", traderW], ["injured", 2]]);
+      if (sub === "injured") {
+        const needDef = pick(npcRng, ["bandage", "medkit"]);
+        const need = ITEM_DEFS[needDef].name;
+        if (firstVisit) {
+          pending = { kind: "injured", name, icon: "🩸", needDef, needName: need };
+          entry.push(`🩸 ${name} lies wounded, begging for a ${need}.`);
+        } else if (Math.random() < 0.35) {
+          // came back too late
+          cleared.add(key);
+          entry.push(`🩸 You return to find ${name} has bled out. You were too slow.`);
+        } else {
+          pending = { kind: "injured", name, icon: "🩸", needDef, needName: need };
+          entry.push(`🩸 ${name} still clings to life, waiting for that ${need}.`);
+        }
+      } else if (sub === "trader") {
         const discount = clamp(repOf(rep, faction), 0, 100) / 200; // up to 50% off for allies
-        pending = { kind: "trader", name, icon: "🧑‍🔧", offers: traderOffers(narr, tile.tier, discount) };
+        pending = { kind: "trader", name, icon: "🧑‍🔧", offers: traderOffers(npcRng, tile.tier, discount) };
         entry.push(`🧑‍🔧 ${name}, a trader, waves you over. "Got goods — if you've got scrap."`);
-      } else if (sub === "injured") {
-        const needDef = pick(narr, ["bandage", "medkit"]);
-        pending = { kind: "injured", name, icon: "🩸", needDef, needName: ITEM_DEFS[needDef].name };
-        entry.push(`🩸 ${name} lies wounded, begging for a ${ITEM_DEFS[needDef].name}.`);
       } else {
         pending = { kind: "survivor", name, icon: "🧑" };
         entry.push(`🧑 ${survivorIntro(narr, name)}`);
@@ -630,7 +644,7 @@ export async function move(playerId: string, dir: Dir): Promise<GameSnapshot | n
 
   await prisma.expedition.update({
     where: { id: exp.id },
-    data: { posX: x, posY: y, distance: Math.max(exp.distance, chebyshev(x, y)), visited: [...visited], log, pending: pending ? (pending as unknown as Prisma.InputJsonValue) : Prisma.DbNull },
+    data: { posX: x, posY: y, distance: Math.max(exp.distance, chebyshev(x, y)), visited: [...visited], cleared: [...cleared], log, pending: pending ? (pending as unknown as Prisma.InputJsonValue) : Prisma.DbNull },
   });
   await prisma.player.update({ where: { id: playerId }, data: { health, radiation, stamina } });
   revalidatePath("/");
@@ -730,9 +744,10 @@ export async function resolveEncounter(playerId: string, choice: "fight" | "flee
   let newPending: EncounterView | null = pending;
 
   if (choice === "flee") {
-    const tile = tileAt(exp.seed, exp.posX, exp.posY);
-    const e = enemyForTile(tile)!;
-    const res = resolveFlee(rng, e.fleeable, stamina, pending.power * 0.5, combat.armor);
+    // Read fleeability from the enemy definition — the current tile may not be
+    // an ENEMY tile (ambushes, wandering threats), so don't derive it from the tile.
+    const fleeable = ENEMIES[pending.enemyKey]?.fleeable ?? 0.5;
+    const res = resolveFlee(rng, fleeable, stamina, pending.power * 0.5, combat.armor);
     stamina = clamp(stamina - 14, 0, 100);
     if (res.escaped) {
       newPending = null;
@@ -806,7 +821,9 @@ export async function recruitSurvivor(playerId: string, accept: boolean): Promis
     await adjustRep(playerId, (player.factionRep as RepMap) ?? {}, changes);
     log.unshift(`🤝 ${pending.name} will make their way to your shelter. Population +1.`);
   }
-  await prisma.expedition.update({ where: { id: exp.id }, data: { log, pending: Prisma.DbNull } });
+  const cleared = new Set((exp.cleared as unknown as string[]) ?? []);
+  cleared.add(`${exp.posX},${exp.posY}`); // they're gone either way
+  await prisma.expedition.update({ where: { id: exp.id }, data: { log, cleared: [...cleared], pending: Prisma.DbNull } });
   revalidatePath("/");
   return loadSnapshot(playerId);
 }
@@ -874,7 +891,9 @@ export async function helpInjured(playerId: string, accept: boolean): Promise<Ga
   if (hf && hf !== "COLLECTIVE") hChanges[hf] = 3;
   await adjustRep(playerId, (player.factionRep as RepMap) ?? {}, hChanges);
   log.unshift(`🩹 You patch up ${pending.name}. (+5 reputation)${joins ? ` Grateful, ${pending.name} will head to your shelter.` : ""}`);
-  await prisma.expedition.update({ where: { id: exp.id }, data: { log, pending: Prisma.DbNull } });
+  const cleared = new Set((exp.cleared as unknown as string[]) ?? []);
+  cleared.add(`${exp.posX},${exp.posY}`);
+  await prisma.expedition.update({ where: { id: exp.id }, data: { log, cleared: [...cleared], pending: Prisma.DbNull } });
   revalidatePath("/");
   return loadSnapshot(playerId);
 }
