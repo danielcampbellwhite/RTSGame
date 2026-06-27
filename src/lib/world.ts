@@ -114,9 +114,10 @@ export async function createGameWorld(
     relations.push({ fromId: aId, toId: bId, opinion: -50 }, { fromId: bId, toId: aId, opinion: -50 });
   }
 
-  // Write everything in dependency order.
+  // Write everything in dependency order. The game starts paused so time does
+  // not advance on its own — the player presses play (▶) to start the clock.
   await prisma.game.create({
-    data: { id: gameId, playerCountry: playerIso, playerName, playerEmail, lastTickAt: new Date() },
+    data: { id: gameId, playerCountry: playerIso, playerName, playerEmail, lastTickAt: new Date(), paused: true },
   });
   await prisma.country.createMany({ data: countries });
   await prisma.territory.createMany({ data: territories });
