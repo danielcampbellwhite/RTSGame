@@ -18,6 +18,17 @@ import { mulberry32, hashSeed, randInt, chance, weighted, pick } from "@/lib/rng
 import { tileAt, lootForTile, enemyForTile, wanderingEnemy, generateLoot, scanAhead, chebyshev, tierForDistance } from "@/lib/wasteland";
 import { BIOMES } from "@/data/world";
 import { sightFor, ambientLine, enemyEntrance, hazardLine, searchNothing, survivorIntro } from "@/data/flavor";
+import { factionAt, FACTIONS, FACTION_KEYS, RIVAL, repOf, standing, type FactionKey, type RepMap } from "@/data/factions";
+import { CONDITIONS, rollCondition, type Condition } from "@/data/conditions";
+
+/** Apply standing changes to a player's faction reputation map (clamped ±100). */
+async function adjustRep(playerId: string, current: RepMap, changes: Partial<Record<FactionKey, number>>): Promise<void> {
+  const next: RepMap = { ...current };
+  for (const k of Object.keys(changes) as FactionKey[]) {
+    next[k] = clamp((next[k] ?? 0) + (changes[k] ?? 0), -100, 100);
+  }
+  await prisma.player.update({ where: { id: playerId }, data: { factionRep: next as unknown as Prisma.InputJsonValue } });
+}
 
 const NOTABLE_FEATURES = new Set(["LOOT", "ENEMY", "HAZARD", "SURVIVOR"]);
 
@@ -31,7 +42,7 @@ function offerPrice(defKey: string): number {
   return Math.max(2, base + d.tier * 3);
 }
 
-function traderOffers(rng: () => number, tier: number): { defKey: string; name: string; icon: string; price: number }[] {
+function traderOffers(rng: () => number, tier: number, discount = 0): { defKey: string; name: string; icon: string; price: number }[] {
   const pool = TRADER_POOL.filter((k) => (ITEM_DEFS[k]?.tier ?? 9) <= tier + 1);
   const picks: string[] = [];
   const n = 2 + Math.floor(rng() * 2);
@@ -40,7 +51,7 @@ function traderOffers(rng: () => number, tier: number): { defKey: string; name: 
     const k = pool[Math.floor(rng() * pool.length)];
     if (k && !picks.includes(k)) picks.push(k);
   }
-  return picks.map((k) => ({ defKey: k, name: ITEM_DEFS[k].name, icon: ITEM_DEFS[k].icon, price: offerPrice(k) }));
+  return picks.map((k) => ({ defKey: k, name: ITEM_DEFS[k].name, icon: ITEM_DEFS[k].icon, price: Math.max(1, Math.round(offerPrice(k) * (1 - discount))) }));
 }
 
 async function backpackQty(playerId: string, defKey: string): Promise<number> {
@@ -242,6 +253,9 @@ async function loadSnapshot(playerId: string, flash: string | null = null): Prom
 
       const carryBonus = equipped.BACKPACK ? ITEM_DEFS[equipped.BACKPACK.defKey]?.carryBonus ?? 0 : 0;
       const cur = tileAt(exp.seed, exp.posX, exp.posY);
+      const condDef = CONDITIONS[(exp.condition as Condition) ?? "CLEAR"] ?? CONDITIONS.CLEAR;
+      const terrFaction = factionAt(exp.seed, exp.posX, exp.posY);
+      const rep = (player.factionRep as RepMap) ?? {};
       expedition = {
         id: exp.id,
         seed: exp.seed,
@@ -253,6 +267,13 @@ async function loadSnapshot(playerId: string, flash: string | null = null): Prom
         windowRadius: WINDOW_RADIUS,
         biomeColor: BIOMES[cur.biome].color,
         biomeName: BIOMES[cur.biome].name,
+        condition: condDef.key,
+        conditionName: condDef.name,
+        conditionIcon: condDef.icon,
+        conditionNote: condDef.note,
+        territoryFaction: terrFaction,
+        territoryName: terrFaction ? FACTIONS[terrFaction].name : null,
+        territoryStanding: terrFaction ? standing(repOf(rep, terrFaction)) : null,
         log: ((exp.log as unknown as string[]) ?? []).slice(0, 16),
         backpack: backpack.map(itemView),
         backpackUsed: backpack.reduce((n, b) => n + b.quantity, 0),
@@ -303,6 +324,10 @@ async function loadSnapshot(playerId: string, flash: string | null = null): Prom
     storage: storage.map(itemView),
     equipped,
     craftables,
+    factions: FACTION_KEYS.map((k) => {
+      const rep = ((player.factionRep as RepMap) ?? {})[k] ?? 0;
+      return { key: k, name: FACTIONS[k].name, icon: FACTIONS[k].icon, color: FACTIONS[k].color, note: FACTIONS[k].note, rep, standing: standing(rep) };
+    }),
     expedition,
     flash,
   };
@@ -469,8 +494,11 @@ export async function repairItem(playerId: string, itemId: string): Promise<Game
 export async function startExpedition(playerId: string): Promise<GameSnapshot | null> {
   const player = await prisma.player.findUnique({ where: { id: playerId } });
   if (!player || player.state !== "AT_SHELTER") return loadSnapshot(playerId);
+  const seed = newSeed();
+  const condition = rollCondition(mulberry32(hashSeed(seed, 31)));
+  const intro = condition === "CLEAR" ? "You step out into the wasteland." : `You step out — ${CONDITIONS[condition].name}. ${CONDITIONS[condition].note}`;
   await prisma.expedition.create({
-    data: { playerId, seed: newSeed(), visited: ["0,0"], log: ["You step out into the wasteland."], posX: 0, posY: 0, distance: 0 },
+    data: { playerId, seed, condition, visited: ["0,0"], log: [intro], posX: 0, posY: 0, distance: 0 },
   });
   await prisma.player.update({ where: { id: playerId }, data: { state: "IN_EXPEDITION", stamina: 100 } });
   revalidatePath("/");
@@ -512,6 +540,10 @@ export async function move(playerId: string, dir: Dir): Promise<GameSnapshot | n
   const entry: string[] = []; // chronological lines for this step
 
   const tile = tileAt(exp.seed, x, y);
+  const cond = (exp.condition as Condition) ?? "CLEAR";
+  const rep = (player.factionRep as RepMap) ?? {};
+  const faction = factionAt(exp.seed, x, y);
+  const factionTag = faction ? ` (${FACTIONS[faction].name})` : "";
 
   if (x === 0 && y === 0) {
     entry.push("You stagger back to the shelter exit — safety is a breath away.");
@@ -520,13 +552,23 @@ export async function move(playerId: string, dir: Dir): Promise<GameSnapshot | n
     if (chance(narr, 0.22)) entry.push(ambientLine(narr));
     if (firstVisit && tile.feature === "ENEMY") {
       const e = enemyForTile(tile)!;
-      pending = { kind: "enemy", enemyKey: e.key, name: e.name, icon: e.icon, power: e.power, hp: e.power, maxHp: e.power };
-      entry.push(`${e.icon} ${enemyEntrance(narr, e.name)}`);
+      // Allies in friendly territory let you pass.
+      if (faction && repOf(rep, faction) >= 40 && chance(narr, 0.6)) {
+        entry.push(`${FACTIONS[faction].icon} ${FACTIONS[faction].name} fighters recognise you and wave you through.`);
+      } else {
+        const elite = tile.tier >= 4 && chance(narr, 0.25);
+        const power = Math.round(e.power * (elite ? 1.6 : 1));
+        const name = elite ? `Elite ${e.name}` : e.name;
+        pending = { kind: "enemy", enemyKey: e.key, name, icon: elite ? "☠️" : e.icon, power, hp: power, maxHp: power, faction: faction ?? null, elite };
+        entry.push(`${pending.icon} ${enemyEntrance(narr, name)}${factionTag}`);
+      }
     } else if (firstVisit && tile.feature === "SURVIVOR") {
       const name = tile.survivorName ?? "a stranger";
-      const sub = weighted(narr, [["recruit", 5], ["trader", 3], ["injured", 2]]);
+      const traderW = cond === "CARAVAN" ? 6 : 3;
+      const sub = weighted(narr, [["recruit", 5], ["trader", traderW], ["injured", 2]]);
       if (sub === "trader") {
-        pending = { kind: "trader", name, icon: "🧑‍🔧", offers: traderOffers(narr, tile.tier) };
+        const discount = clamp(repOf(rep, faction), 0, 100) / 200; // up to 50% off for allies
+        pending = { kind: "trader", name, icon: "🧑‍🔧", offers: traderOffers(narr, tile.tier, discount) };
         entry.push(`🧑‍🔧 ${name}, a trader, waves you over. "Got goods — if you've got scrap."`);
       } else if (sub === "injured") {
         const needDef = pick(narr, ["bandage", "medkit"]);
@@ -537,17 +579,34 @@ export async function move(playerId: string, dir: Dir): Promise<GameSnapshot | n
         entry.push(`🧑 ${survivorIntro(narr, name)}`);
       }
     } else if (firstVisit && (tile.feature === "LOOT" || tile.feature === "CACHE")) {
-      const drops = lootForTile(exp.seed, tile);
+      const lootTile = cond === "BOUNTIFUL" ? { ...tile, tier: tile.tier + 1 } : tile;
+      const drops = lootForTile(exp.seed, lootTile);
       const added = await addLootToBackpack(playerId, drops);
       entry.push(added ? `${tile.icon} You scavenge the ${tile.label}. Recovered: ${added}.` : `${tile.icon} The ${tile.label} has already been stripped bare.`);
     } else if (firstVisit && tile.feature === "HAZARD") {
-      const dose = Math.round(randInt(narr, SURV.radPerHazard[0], SURV.radPerHazard[1]) * (tile.hazard === "RADIATION" ? 1 : 0.6));
+      const stormMult = cond === "RAD_STORM" ? 1.6 : 1;
+      const dose = Math.round(randInt(narr, SURV.radPerHazard[0], SURV.radPerHazard[1]) * (tile.hazard === "RADIATION" ? 1 : 0.6) * stormMult);
       radiation = clamp(radiation + dose);
       entry.push(`${tile.icon} ${hazardLine(narr, tile.hazard!)} (+${dose} rad)`);
     } else if (!firstVisit) {
       entry.push("Your own tracks cross this ground. Nothing new stirs.");
     }
-    // What's immediately around you — so you can pick your next step.
+
+    // Hostile ambushes: raider-heavy conditions, or territory whose faction
+    // you've turned against.
+    if (!pending && firstVisit) {
+      const hostileTerritory = faction != null && repOf(rep, faction) <= -40;
+      const ambushChance = (cond === "RAIDER_ACTIVITY" ? 0.18 : 0) + (hostileTerritory ? 0.15 : 0);
+      if (ambushChance > 0 && chance(narr, ambushChance)) {
+        const e = wanderingEnemy(narr, tile.tier);
+        pending = { kind: "enemy", enemyKey: e.key, name: e.name, icon: e.icon, power: e.power, hp: e.power, maxHp: e.power, faction: faction ?? null };
+        entry.push(`${e.icon} Ambush! ${enemyEntrance(narr, e.name)}${factionTag}`);
+      }
+    }
+
+    // Radiation storms irradiate you even between hazard tiles.
+    if (cond === "RAD_STORM" && firstVisit) radiation = clamp(radiation + 2);
+
     if (!pending) {
       const near = surroundings(exp.seed, x, y);
       if (near) entry.push(`Nearby: ${near}.`);
@@ -691,13 +750,19 @@ export async function resolveEncounter(playerId: string, choice: "fight" | "flee
     log.unshift(`⚔️ ${r.note}${r.damageTaken ? ` (−${r.damageTaken} HP)` : ""}`);
     if (r.win) {
       newPending = null;
-      const reward = SURV.xpPerKill + pending.power / 4;
+      const reward = (SURV.xpPerKill + pending.power / 4) * (pending.elite ? 1.8 : 1);
       xp += Math.round(reward);
-      // small loot from the body
+      // small loot from the body (elites drop more)
       const tier = tierForDistance(chebyshev(exp.posX, exp.posY));
       const drops = lootForTile(exp.seed, { ...tileAt(exp.seed, exp.posX, exp.posY), feature: "CACHE" });
-      const added = await addLootToBackpack(playerId, drops.slice(0, 1 + Math.floor(tier / 2)));
+      const added = await addLootToBackpack(playerId, drops.slice(0, (1 + Math.floor(tier / 2)) * (pending.elite ? 2 : 1)));
       log.unshift(`🎖️ Defeated the ${pending.name}. +${Math.round(reward)} XP${added ? `, looted ${added}` : ""}.`);
+      // Killing a faction's fighters sours your standing with them (and warms a rival).
+      const f = pending.faction as FactionKey | null | undefined;
+      if (f) {
+        await adjustRep(playerId, (player.factionRep as RepMap) ?? {}, { [f]: -4, [RIVAL[f]]: 2 });
+        log.unshift(`${FACTIONS[f].icon} Your standing with ${FACTIONS[f].name} has fallen.`);
+      }
     } else {
       newPending = { ...pending, hp: r.enemyHp };
     }
@@ -735,6 +800,10 @@ export async function recruitSurvivor(playerId: string, accept: boolean): Promis
     log.unshift(`${pending.name} would join you, but the shelter is full (${player.shelter.population}/${player.shelter.popCap}). Build more beds.`);
   } else {
     await prisma.shelter.update({ where: { id: player.shelter.id }, data: { population: { increment: 1 }, morale: { increment: 3 } } });
+    const f = factionAt(exp.seed, exp.posX, exp.posY);
+    const changes: Partial<Record<FactionKey, number>> = { COLLECTIVE: 5 };
+    if (f && f !== "COLLECTIVE") changes[f] = 3;
+    await adjustRep(playerId, (player.factionRep as RepMap) ?? {}, changes);
     log.unshift(`🤝 ${pending.name} will make their way to your shelter. Population +1.`);
   }
   await prisma.expedition.update({ where: { id: exp.id }, data: { log, pending: Prisma.DbNull } });
@@ -800,6 +869,10 @@ export async function helpInjured(playerId: string, accept: boolean): Promise<Ga
   const joins = Math.random() < 0.5 && player.shelter.population < player.shelter.popCap;
   await prisma.player.update({ where: { id: playerId }, data: { reputation: { increment: 5 } } });
   if (joins) await prisma.shelter.update({ where: { id: player.shelter.id }, data: { population: { increment: 1 }, morale: { increment: 3 } } });
+  const hf = factionAt(exp.seed, exp.posX, exp.posY);
+  const hChanges: Partial<Record<FactionKey, number>> = { COLLECTIVE: 5 };
+  if (hf && hf !== "COLLECTIVE") hChanges[hf] = 3;
+  await adjustRep(playerId, (player.factionRep as RepMap) ?? {}, hChanges);
   log.unshift(`🩹 You patch up ${pending.name}. (+5 reputation)${joins ? ` Grateful, ${pending.name} will head to your shelter.` : ""}`);
   await prisma.expedition.update({ where: { id: exp.id }, data: { log, pending: Prisma.DbNull } });
   revalidatePath("/");
@@ -880,7 +953,22 @@ export async function returnHome(playerId: string): Promise<GameSnapshot | null>
   });
 
   const resSummary = Object.entries(resourceGain).map(([k, v]) => `+${Math.round(v)} ${k}`).join(", ");
-  const flash = `Made it home${bitten ? ` (−${bitten} HP en route)` : ""}. Secured ${kept} item(s)${resSummary ? `, ${resSummary}` : ""}.`;
+  let flash = `Made it home${bitten ? ` (−${bitten} HP en route)` : ""}. Secured ${kept} item(s)${resSummary ? `, ${resSummary}` : ""}.`;
+
+  // "While you were away" — the world kept turning at the shelter.
+  const roll = Math.random();
+  if (roll < 0.16) {
+    const loss = randInt(rng, 4, 14);
+    await prisma.shelter.update({ where: { id: player.shelter.id }, data: { scrap: { decrement: loss }, morale: { decrement: 5 } } });
+    flash += ` ⚠ Raiders probed the shelter while you were out — lost ${loss} scrap.`;
+  } else if (roll < 0.28 && player.shelter.population < player.shelter.popCap) {
+    await prisma.shelter.update({ where: { id: player.shelter.id }, data: { population: { increment: 1 } } });
+    flash += ` 🚪 A wanderer found your shelter and stayed. Population +1.`;
+  } else if (roll < 0.36) {
+    await prisma.shelter.update({ where: { id: player.shelter.id }, data: { food: { increment: 8 }, water: { increment: 8 } } });
+    flash += ` 🌧 Good fortune: rain barrels filled and a garden bore fruit (+food/water).`;
+  }
+
   revalidatePath("/");
   return loadSnapshot(playerId, flash);
 }

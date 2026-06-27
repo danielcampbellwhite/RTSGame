@@ -59,6 +59,9 @@ model Player {
   xp         Int @default(0)
   reputation Int @default(0)
 
+  // Standing with each wasteland faction: { RAIDERS: n, COLLECTIVE: n, WARDENS: n }.
+  factionRep Json @default("{}")
+
   state PlayerState @default(AT_SHELTER)
 
   shelter     Shelter?
@@ -130,8 +133,9 @@ model Expedition {
   playerId String
   player   Player @relation(fields: [playerId], references: [id], onDelete: Cascade)
 
-  seed   Int // deterministic world generation for this run
-  status ExpeditionStatus @default(ACTIVE)
+  seed      Int // deterministic world generation for this run
+  status    ExpeditionStatus @default(ACTIVE)
+  condition String           @default("CLEAR") // the run's weather/threat condition
 
   // Position on the region grid (shelter exit = 0,0).
   posX     Int @default(0)

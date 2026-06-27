@@ -23,8 +23,11 @@ export default function WastelandView() {
       {/* HUD */}
       <div className="panel rounded p-2">
         <div className="flex items-center justify-between text-[10px]">
-          <span className="title text-[var(--rust)]">WASTELAND</span>
-          <span className="text-[var(--ink-dim)]">{exp.biomeName} · {exp.distance} out · Tier {exp.tier}</span>
+          <span className="title text-[var(--rust)]">{exp.conditionIcon} {exp.conditionName}</span>
+          <span className="text-[var(--ink-dim)]">{exp.biomeName} · {exp.distance} out · T{exp.tier}</span>
+        </div>
+        <div className="mt-0.5 text-[9px] text-[var(--ink-dim)]">
+          {exp.territoryName ? `Territory: ${exp.territoryName} · ${exp.territoryStanding}` : "Territory: unclaimed wastes"}
         </div>
         <div className="mt-2 grid grid-cols-3 gap-2">
           <Meter label="Health" value={player.health} max={player.maxHealth} color="#b13838" />

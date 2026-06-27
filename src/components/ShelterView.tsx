@@ -17,7 +17,7 @@ const RES: { k: "food" | "water" | "meds" | "ammo" | "scrap" | "fuel"; name: str
   { k: "fuel", name: "Fuel", icon: "⛽" },
 ];
 
-type Tab = "loadout" | "crew" | "craft" | "build";
+type Tab = "loadout" | "crew" | "craft" | "build" | "factions";
 
 const SLOTS: { key: string; label: string }[] = [
   { key: "PRIMARY", label: "Primary" },
@@ -31,7 +31,7 @@ export default function ShelterView() {
   const snap = useGame((s) => s.snapshot)!;
   const { run, isPending } = useAction();
   const [tab, setTab] = useState<Tab>("loadout");
-  const { player, shelter, storage, equipped, craftables } = snap;
+  const { player, shelter, storage, equipped, craftables, factions } = snap;
 
   return (
     <div className="flex h-full w-full flex-col gap-2 overflow-hidden p-2">
@@ -92,13 +92,13 @@ export default function ShelterView() {
 
       {/* Tabs */}
       <div className="flex gap-1">
-        {(["loadout", "crew", "craft", "build"] as Tab[]).map((t) => (
+        {(["loadout", "crew", "craft", "build", "factions"] as Tab[]).map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
-            className={`btn flex-1 rounded py-2 text-[11px] ${tab === t ? "border-[var(--rust)] text-[#ffd9a8]" : ""}`}
+            className={`btn flex-1 rounded py-2 text-[10px] ${tab === t ? "border-[var(--rust)] text-[#ffd9a8]" : ""}`}
           >
-            {t === "loadout" ? "Loadout" : t === "crew" ? "Crew" : t === "craft" ? "Workbench" : "Build"}
+            {t === "loadout" ? "Loadout" : t === "crew" ? "Crew" : t === "craft" ? "Craft" : t === "build" ? "Build" : "Factions"}
           </button>
         ))}
       </div>
@@ -117,6 +117,27 @@ export default function ShelterView() {
         )}
         {tab === "crew" && (
           <Crew shelter={shelter} onAssign={(job, d) => run(() => assignWork(player.id, job, d))} busy={isPending} />
+        )}
+        {tab === "factions" && (
+          <div className="space-y-2">
+            <p className="text-[10px] text-[var(--ink-dim)]">
+              Your standing across the wasteland's powers. Help their people to gain favour; kill their fighters and they&apos;ll hunt you.
+            </p>
+            {factions.map((f) => {
+              const pct = ((f.rep + 100) / 200) * 100;
+              const col = f.rep >= 25 ? "var(--good)" : f.rep > -25 ? "var(--amber)" : "var(--blood)";
+              return (
+                <div key={f.key} className="inset rounded p-2">
+                  <div className="flex items-center justify-between text-xs">
+                    <span style={{ color: f.color }}>{f.icon} {f.name}</span>
+                    <span style={{ color: col }}>{f.standing} ({f.rep > 0 ? "+" : ""}{f.rep})</span>
+                  </div>
+                  <div className="meter mt-1"><i style={{ width: `${pct}%`, background: col }} /></div>
+                  <div className="mt-1 text-[9px] text-[var(--ink-dim)]">{f.note}</div>
+                </div>
+              );
+            })}
+          </div>
         )}
         {tab === "craft" && (
           <div className="space-y-1">
