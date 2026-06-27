@@ -34,17 +34,19 @@ export default function ShelterView() {
   const { player, shelter, storage, equipped, craftables, factions } = snap;
 
   return (
-    <div className="flex h-full w-full flex-col gap-2 overflow-y-auto scroll-thin p-2">
-      {/* Header banner: the shelter interior, with identity + vitals overlaid */}
+    <div className="h-full w-full space-y-2 overflow-y-auto scroll-thin p-2">
+      {/* Header banner: the shelter interior, with identity + vitals overlaid.
+          Fixed height + shrink-0 so the scrollable column can't squash it. */}
       <div
-        className="panel relative overflow-hidden rounded"
+        className="panel relative flex shrink-0 flex-col justify-end overflow-hidden rounded"
         style={{
-          backgroundImage: "linear-gradient(180deg, rgba(12,10,8,0.25) 0%, rgba(12,10,8,0.55) 45%, rgba(12,10,8,0.94) 100%), url('/shelter.png')",
+          backgroundImage: "linear-gradient(180deg, rgba(12,10,8,0.15) 0%, rgba(12,10,8,0.5) 45%, rgba(12,10,8,0.94) 100%), url('/shelter.png')",
           backgroundSize: "cover",
-          backgroundPosition: "center 32%",
+          backgroundPosition: "center 35%",
+          height: "min(52vw, 240px)",
         }}
       >
-        <div className="p-3 pt-20">
+        <div className="p-3">
           <div className="flex items-end justify-between">
             <div>
               <div className="title stamp text-xl font-bold text-[#ffd9a8]">{player.name}</div>
