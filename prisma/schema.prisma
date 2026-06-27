@@ -1,7 +1,13 @@
-// World Dominion — database schema
-// Covers all systems across development phases 1–9.
-// "Region" in the design doc is represented by Territory.kind; the Territory
-// is the atomic, individually-conquerable sector.
+// Aftermath — post-apocalyptic survival game schema.
+//
+// Design note on persistence vs. risk:
+//   • Shelter + its stored resources + equipped/stored items = PERMANENT.
+//   • An Expedition holds the run's transient state; items carried in the
+//     BACKPACK during a run are LOST on death and only secured on a safe
+//     return. This split is the heart of the risk/reward loop.
+//
+// Item *definitions* (stats, recipes, loot tables) live in code (src/data),
+// not the DB — only item *instances* a player owns are persisted.
 
 generator client {
   provider = "prisma-client-js"
@@ -13,467 +19,119 @@ datasource db {
   directUrl = env("DIRECT_URL")
 }
 
-// ──────────────────────────────────────────────────────────────────────────
-// SAVE / GAME INSTANCE
-// ──────────────────────────────────────────────────────────────────────────
-
-model Game {
-  id            String   @id @default(cuid())
-  // Single-player: the human-controlled country.
-  playerName    String   @default("Commander")
-  playerEmail   String?
-  // ISO-3166 alpha-3 of the country the player controls.
-  playerCountry String
-  speed         Float    @default(1) // global time multiplier
-  // Wall-clock anchor for the catch-up simulation model.
-  lastTickAt    DateTime @default(now())
-  // Simulation clock: advances by (wall elapsed × speed) and freezes while
-  // paused. All construction/research/movement/cooldown deadlines live on this
-  // clock, so pause genuinely freezes them and speed accelerates them.
-  simClock      DateTime @default(now())
-  createdAt     DateTime @default(now())
-  paused        Boolean  @default(false)
-
-  countries Country[]
-  events    GameEvent[]
-  wars      War[]
-
-  @@index([playerEmail])
+enum PlayerState {
+  AT_SHELTER
+  IN_EXPEDITION
 }
 
-// ──────────────────────────────────────────────────────────────────────────
-// COUNTRIES
-// ──────────────────────────────────────────────────────────────────────────
-
-model Country {
-  id     String  @id @default(cuid())
-  gameId String
-  game   Game    @relation(fields: [gameId], references: [id], onDelete: Cascade)
-
-  iso3       String // ISO-3166 alpha-3, e.g. "GBR"
-  name       String
-  capitalLng Float
-  capitalLat Float
-  isPlayer   Boolean @default(false)
-  isAlive    Boolean @default(true)
-
-  // ── Core national stats (0–100 unless noted) ──
-  population     Float // millions
-  gdp            Float // billions USD (notional, drives the economy sim)
-  stability      Float @default(60)
-  techLevel      Float @default(40)
-  influence      Float @default(20)
-  morale         Float @default(60)
-  infrastructure Float @default(50)
-
-  // ── Resource stockpiles ──
-  money         Float @default(0) // treasury, billions
-  oil           Float @default(0)
-  food          Float @default(0)
-  electricity   Float @default(0)
-  steel         Float @default(0)
-  rareMaterials Float @default(0)
-  manpower      Float @default(0) // available recruitable pool, millions
-
-  // ── Policy levers (player & AI set these) ──
-  taxRate            Float @default(25) // %
-  militaryBudgetPct  Float @default(20)
-  welfareBudgetPct   Float @default(30)
-  infraBudgetPct     Float @default(20)
-  researchBudgetPct  Float @default(15)
-
-  // ── AI personality (ignored for the player country) ──
-  aiAggression     Float @default(40)
-  aiEconomyFocus   Float @default(50)
-  aiMilitaryFocus  Float @default(40)
-  aiDiplomacyPref  Float @default(50)
-  aiRiskTolerance  Float @default(40)
-
-  territories      Territory[]
-  armies           Army[]
-  fleets           Fleet[]
-  airWings         AirWing[]
-  research         ResearchProject[]
-  relationsFrom    DiplomaticRelation[] @relation("RelationFrom")
-  relationsTo      DiplomaticRelation[] @relation("RelationTo")
-  tradeRoutesOut   TradeRoute[]         @relation("TradeFrom")
-  tradeRoutesIn    TradeRoute[]         @relation("TradeTo")
-  warParticipation WarParticipant[]
-
-  @@unique([gameId, iso3])
-  @@index([gameId])
+enum ItemLocation {
+  STORAGE // safe in the shelter
+  BACKPACK // carried on the current expedition (lost on death)
 }
 
-// ──────────────────────────────────────────────────────────────────────────
-// TERRITORIES (the conquerable sectors / "regions")
-// ──────────────────────────────────────────────────────────────────────────
-
-enum TerritoryKind {
-  CAPITAL
-  MAJOR_CITY
-  INDUSTRIAL
-  PORT
-  MILITARY
-  RURAL
+enum EquipSlot {
+  PRIMARY
+  SECONDARY
+  ARMOR
+  HELMET
+  BACKPACK
 }
 
-enum Terrain {
-  PLAINS
-  FOREST
-  MOUNTAIN
-  DESERT
-  URBAN
-  COASTAL
-}
-
-model Territory {
-  id        String  @id @default(cuid())
-  countryId String
-  country   Country @relation(fields: [countryId], references: [id], onDelete: Cascade)
-
-  name  String
-  kind  TerritoryKind @default(RURAL)
-  terr  Terrain       @default(PLAINS)
-  lng   Float
-  lat   Float
-
-  population     Float // millions
-  morale         Float @default(60)
-  economy        Float @default(50)
-  infrastructure Float @default(50)
-  defenses       Float @default(10) // fortification level
-  unrest         Float @default(0)  // rebellion pressure
-
-  // Occupation: who originally owns vs who currently controls.
-  originalOwner String  // iso3
-  controlPct    Float   @default(100) // 0–100 control held by `countryId`
-  occupied      Boolean @default(false)
-
-  // Adjacency for front-line movement (territory ids).
-  neighbors String[] @default([])
-
-  buildings Building[]
-
-  @@index([countryId])
-}
-
-// ──────────────────────────────────────────────────────────────────────────
-// BUILDINGS
-// ──────────────────────────────────────────────────────────────────────────
-
-enum BuildingType {
-  // civilian
-  HOUSING
-  FACTORY
-  POWER_PLANT
-  FARM
-  HOSPITAL
-  // military
-  BARRACKS
-  AIR_BASE
-  NAVAL_BASE
-  MISSILE_SILO
-  RADAR
-  // infrastructure
-  ROAD
-  RAILWAY
-  PORT
-  AIRPORT
-}
-
-model Building {
-  id          String       @id @default(cuid())
-  territoryId String
-  territory   Territory    @relation(fields: [territoryId], references: [id], onDelete: Cascade)
-  type        BuildingType
-  level       Int          @default(1)
-
-  // Construction / upgrade in progress.
-  buildingToLevel Int?
-  completesAt     DateTime?
-
-  @@index([territoryId])
-}
-
-// ──────────────────────────────────────────────────────────────────────────
-// MILITARY FORCES
-// ──────────────────────────────────────────────────────────────────────────
-
-enum UnitType {
-  INFANTRY
-  MECHANIZED
-  TANK
-  ARTILLERY
-  AIR_DEFENSE
-  FIGHTER
-  BOMBER
-  DRONE
-  TRANSPORT_AIR
-  FRIGATE
-  DESTROYER
-  SUBMARINE
-  CARRIER
-  MISSILE
-  NUKE
-  INTEL
-}
-
-enum OrderState {
-  IDLE
-  MOVING
-  ENGAGED
-}
-
-// A land force composed of units; occupies/garrisons a territory.
-model Army {
-  id        String  @id @default(cuid())
-  countryId String
-  country   Country @relation(fields: [countryId], references: [id], onDelete: Cascade)
-  name      String
-
-  locationTerritoryId String?
-  state               OrderState @default(IDLE)
-  targetTerritoryId   String?
-  arrivesAt           DateTime?
-
-  strength Float @default(0)  // derived combat power
-  morale   Float @default(70)
-  supply   Float @default(100)
-  strikeReadyAt DateTime? // ranged/air strike cooldown
-
-  units Unit[]
-
-  @@index([countryId])
-}
-
-model Fleet {
-  id        String  @id @default(cuid())
-  countryId String
-  country   Country @relation(fields: [countryId], references: [id], onDelete: Cascade)
-  name      String
-
-  lng       Float
-  lat       Float
-  state     OrderState @default(IDLE)
-  targetLng Float?
-  targetLat Float?
-  arrivesAt DateTime?
-
-  strength Float @default(0)
-  morale   Float @default(70)
-  supply   Float @default(100)
-  strikeReadyAt DateTime?
-
-  units Unit[]
-
-  @@index([countryId])
-}
-
-model AirWing {
-  id        String  @id @default(cuid())
-  countryId String
-  country   Country @relation(fields: [countryId], references: [id], onDelete: Cascade)
-  name      String
-
-  baseTerritoryId String?
-  state           OrderState @default(IDLE)
-  targetLng       Float?
-  targetLat       Float?
-  arrivesAt       DateTime?
-  readyAt         DateTime? // sortie cooldown
-
-  strength Float @default(0)
-  morale   Float @default(70)
-
-  units Unit[]
-
-  @@index([countryId])
-}
-
-// Units belong to exactly one parent force (army/fleet/airwing).
-model Unit {
-  id        String   @id @default(cuid())
-  type      UnitType
-  count     Int      @default(1)
-  health    Float    @default(100)
-
-  armyId    String?
-  army      Army?    @relation(fields: [armyId], references: [id], onDelete: Cascade)
-  fleetId   String?
-  fleet     Fleet?   @relation(fields: [fleetId], references: [id], onDelete: Cascade)
-  airWingId String?
-  airWing   AirWing? @relation(fields: [airWingId], references: [id], onDelete: Cascade)
-
-  @@index([armyId])
-  @@index([fleetId])
-  @@index([airWingId])
-}
-
-// ──────────────────────────────────────────────────────────────────────────
-// DIPLOMACY
-// ──────────────────────────────────────────────────────────────────────────
-
-model DiplomaticRelation {
-  id       String  @id @default(cuid())
-  fromId   String
-  from     Country @relation("RelationFrom", fields: [fromId], references: [id], onDelete: Cascade)
-  toId     String
-  to       Country @relation("RelationTo", fields: [toId], references: [id], onDelete: Cascade)
-
-  opinion    Float   @default(0) // -100..+100
-  allied     Boolean @default(false)
-  embargo    Boolean @default(false)
-  sanctioned Boolean @default(false)
-  guaranteed Boolean @default(false) // independence guarantee
-  atWar      Boolean @default(false)
-
-  @@unique([fromId, toId])
-  @@index([fromId])
-  @@index([toId])
-}
-
-// ──────────────────────────────────────────────────────────────────────────
-// TRADE
-// ──────────────────────────────────────────────────────────────────────────
-
-enum TradeGood {
-  MONEY
-  OIL
-  FOOD
-  STEEL
-  RARE_MATERIALS
-  TECHNOLOGY
-}
-
-enum TradeMode {
-  SHIPPING
-  AIR_CARGO
-  LAND
-}
-
-model TradeRoute {
-  id     String  @id @default(cuid())
-  fromId String
-  from   Country @relation("TradeFrom", fields: [fromId], references: [id], onDelete: Cascade)
-  toId   String
-  to     Country @relation("TradeTo", fields: [toId], references: [id], onDelete: Cascade)
-
-  good       TradeGood
-  mode       TradeMode @default(SHIPPING)
-  ratePerDay Float // units/day delivered
-  active     Boolean   @default(true)
-  blockaded  Boolean   @default(false)
-
-  @@index([fromId])
-  @@index([toId])
-}
-
-// ──────────────────────────────────────────────────────────────────────────
-// RESEARCH
-// ──────────────────────────────────────────────────────────────────────────
-
-enum ResearchCategory {
-  MILITARY
-  ECONOMY
-  ENERGY
-  INTELLIGENCE
-  INFRASTRUCTURE
-}
-
-model ResearchProject {
-  id        String  @id @default(cuid())
-  countryId String
-  country   Country @relation(fields: [countryId], references: [id], onDelete: Cascade)
-
-  techKey     String // references a static tech-tree node
-  category    ResearchCategory
-  progress    Float            @default(0) // 0–100
-  completed   Boolean          @default(false)
-  completesAt DateTime?
-
-  @@unique([countryId, techKey])
-  @@index([countryId])
-}
-
-// ──────────────────────────────────────────────────────────────────────────
-// WARS
-// ──────────────────────────────────────────────────────────────────────────
-
-enum WarStatus {
+enum ExpeditionStatus {
   ACTIVE
-  CEASEFIRE
-  ENDED
+  RETURNED
+  DIED
 }
 
-model War {
-  id       String    @id @default(cuid())
-  gameId   String
-  game     Game      @relation(fields: [gameId], references: [id], onDelete: Cascade)
-  name     String
-  status   WarStatus @default(ACTIVE)
-  startedAt DateTime @default(now())
+model Player {
+  id        String   @id @default(cuid())
+  name      String
+  createdAt DateTime @default(now())
+
+  // Character vitals (reset to full on respawn).
+  health    Int @default(100)
+  maxHealth Int @default(100)
+  stamina   Int @default(100)
+  radiation Int @default(0)
+
+  // Permanent progression.
+  level      Int @default(1)
+  xp         Int @default(0)
+  reputation Int @default(0)
+
+  state PlayerState @default(AT_SHELTER)
+
+  shelter     Shelter?
+  items       ItemStack[]
+  expeditions Expedition[]
+
+  @@index([name])
+}
+
+model Shelter {
+  id       String @id @default(cuid())
+  playerId String @unique
+  player   Player @relation(fields: [playerId], references: [id], onDelete: Cascade)
+
+  level Int @default(1)
+
+  // Permanently stored survival resources.
+  food   Int @default(60)
+  water  Int @default(60)
+  meds   Int @default(20)
+  ammo   Int @default(40)
+  scrap  Int @default(30)
+  fuel   Int @default(20)
+  morale Int @default(80)
+
+  // Crafting-station tiers (0 = not built yet).
+  workshopLvl    Int @default(1)
+  medicalLvl     Int @default(1)
+  ammoBenchLvl   Int @default(0)
+  weaponBenchLvl Int @default(0)
+
+  storageCap Int      @default(240)
+  lastTickAt DateTime @default(now()) // anchor for resource depletion
+}
+
+model ItemStack {
+  id       String @id @default(cuid())
+  playerId String
+  player   Player @relation(fields: [playerId], references: [id], onDelete: Cascade)
+
+  defKey   String // -> ITEM_DEFS[defKey] in src/data/items.ts
+  quantity Int    @default(1)
+
+  // Condition for gear; null for stackable consumables/materials.
+  durability Int?
+
+  location     ItemLocation @default(STORAGE)
+  equippedSlot EquipSlot? // set when this stack is equipped
+
+  createdAt DateTime @default(now())
+
+  @@index([playerId, location])
+}
+
+model Expedition {
+  id       String @id @default(cuid())
+  playerId String
+  player   Player @relation(fields: [playerId], references: [id], onDelete: Cascade)
+
+  seed   Int // deterministic world generation for this run
+  status ExpeditionStatus @default(ACTIVE)
+
+  // Position on the region grid (shelter exit = 0,0).
+  posX     Int @default(0)
+  posY     Int @default(0)
+  distance Int @default(0) // Chebyshev distance from exit -> risk/reward scaling
+
+  visited Json  @default("[]") // explored tile keys "x,y" (fog of war)
+  log     Json  @default("[]") // recent event log entries
+  pending Json? // an encounter on the current tile awaiting the player's choice
+
+  startedAt DateTime  @default(now())
   endedAt   DateTime?
 
-  participants WarParticipant[]
-
-  @@index([gameId])
-}
-
-model WarParticipant {
-  id        String  @id @default(cuid())
-  warId     String
-  war       War     @relation(fields: [warId], references: [id], onDelete: Cascade)
-  countryId String
-  country   Country @relation(fields: [countryId], references: [id], onDelete: Cascade)
-  attacker  Boolean @default(false)
-  warScore  Float   @default(0) // -100..+100
-
-  @@unique([warId, countryId])
-  @@index([warId])
-}
-
-// ──────────────────────────────────────────────────────────────────────────
-// EVENTS (world events + player-facing event feed)
-// ──────────────────────────────────────────────────────────────────────────
-
-enum EventScope {
-  GLOBAL
-  REGIONAL
-  COUNTRY
-}
-
-enum EventCategory {
-  // world events
-  RECESSION
-  PANDEMIC
-  REFUGEE_CRISIS
-  OIL_SHORTAGE
-  NATURAL_DISASTER
-  CYBER_ATTACK
-  POLITICAL_INSTABILITY
-  // gameplay log
-  BATTLE
-  CONSTRUCTION
-  RESEARCH
-  DIPLOMACY
-  TRADE
-  ECONOMY
-  SYSTEM
-}
-
-model GameEvent {
-  id       String        @id @default(cuid())
-  gameId   String
-  game     Game          @relation(fields: [gameId], references: [id], onDelete: Cascade)
-  scope    EventScope    @default(GLOBAL)
-  category EventCategory
-  title    String
-  body     String?
-  // iso3 of the country this event concerns, if any.
-  countryIso String?
-  severity   Int      @default(1) // 1 info, 2 notable, 3 critical
-  createdAt  DateTime @default(now())
-  read       Boolean  @default(false)
-
-  @@index([gameId, createdAt])
+  @@index([playerId, status])
 }

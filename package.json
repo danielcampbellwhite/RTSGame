@@ -1,32 +1,24 @@
 {
-  "name": "world-dominion",
+  "name": "aftermath",
   "version": "0.1.0",
   "private": true,
-  "description": "World Dominion — a persistent real-time single-player geopolitical grand strategy game.",
+  "description": "Aftermath — a post-apocalyptic survival game: prepare at the shelter, raid the wasteland, return alive.",
   "scripts": {
     "dev": "next dev",
     "build": "prisma generate && next build",
-    "vercel-build": "prisma generate && prisma migrate deploy && next build",
+    "vercel-build": "prisma generate && prisma db push --accept-data-loss && next build",
     "start": "next start",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
     "db:generate": "prisma generate",
     "db:push": "prisma db push",
-    "db:migrate": "prisma migrate dev",
-    "db:seed": "tsx prisma/seed.ts",
     "db:studio": "prisma studio"
-  },
-  "prisma": {
-    "seed": "tsx prisma/seed.ts"
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.1.0",
     "@prisma/adapter-neon": "^6.19.3",
     "@prisma/client": "^6.3.0",
-    "d3-delaunay": "^6.0.4",
-    "maplibre-gl": "^5.1.0",
     "next": "^16.0.0",
-    "polygon-clipping": "^0.15.7",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "ws": "^8.21.0",
@@ -34,16 +26,13 @@
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.0.0",
-    "@types/d3-delaunay": "^6.0.4",
     "@types/node": "^22.10.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@types/ws": "^8.18.1",
     "prisma": "^6.3.0",
     "tailwindcss": "^4.0.0",
-    "topojson-client": "^3.1.0",
     "tsx": "^4.19.0",
-    "typescript": "^5.7.0",
-    "world-atlas": "^2.0.2"
+    "typescript": "^5.7.0"
   }
 }

@@ -1,34 +1,18 @@
 import { create } from "zustand";
-import type { WorldSnapshot } from "@/lib/snapshot";
+import type { GameSnapshot } from "@/lib/types";
 
-export type MobileTab = "map" | "info" | "feed";
-
-interface GameState {
-  snapshot: WorldSnapshot | null;
-  selectedTerritoryId: string | null;
-  selectedCountryIso: string | null;
-  // First tap on a zone highlights it; a second tap opens its management screen.
-  highlightedZoneId: string | null;
-  mobileTab: MobileTab;
-  setSnapshot: (s: WorldSnapshot | null) => void;
-  selectTerritory: (id: string | null) => void;
-  selectCountry: (iso: string | null) => void;
-  highlightZone: (id: string | null) => void;
-  setMobileTab: (t: MobileTab) => void;
-  /** Close the panel: clear selection and return to the map view. */
-  closeToMap: () => void;
+interface State {
+  playerId: string | null;
+  snapshot: GameSnapshot | null;
+  setPlayerId: (id: string | null) => void;
+  setSnapshot: (s: GameSnapshot | null) => void;
 }
 
-export const useGameStore = create<GameState>((set) => ({
+export const useGame = create<State>((set) => ({
+  playerId: null,
   snapshot: null,
-  selectedTerritoryId: null,
-  selectedCountryIso: null,
-  highlightedZoneId: null,
-  mobileTab: "map",
-  setSnapshot: (s) => set({ snapshot: s }),
-  selectTerritory: (id) => set({ selectedTerritoryId: id }),
-  selectCountry: (iso) => set({ selectedCountryIso: iso }),
-  highlightZone: (id) => set({ highlightedZoneId: id }),
-  setMobileTab: (t) => set({ mobileTab: t }),
-  closeToMap: () => set({ selectedTerritoryId: null, selectedCountryIso: null, highlightedZoneId: null, mobileTab: "map" }),
+  setPlayerId: (playerId) => set({ playerId }),
+  setSnapshot: (snapshot) => set({ snapshot }),
 }));
+
+export const PID_KEY = "aftermath_pid";

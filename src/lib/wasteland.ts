@@ -1,0 +1,155 @@
+// Seed-based procedural wasteland. Every tile is a pure function of
+// (seed, x, y), so the world is reproducible and effectively endless. Danger
+// and loot quality scale with Chebyshev distance from the shelter exit (0,0).
+
+import { tileRng, mulberry32, hashSeed, randInt, weighted, pick, chance, type Rng } from "@/lib/rng";
+import { ITEM_DEFS } from "@/data/items";
+import { BIOMES, LOCATIONS, LOCATION_KEYS, ENEMIES, ENEMY_KEYS, type Biome, type HazardKind, type LootTable } from "@/data/world";
+
+export type FeatureKind = "EXIT" | "EMPTY" | "LOOT" | "ENEMY" | "HAZARD" | "CACHE";
+
+export interface LootDrop {
+  defKey: string;
+  quantity: number;
+  durability: number | null;
+}
+
+export interface Tile {
+  x: number;
+  y: number;
+  biome: Biome;
+  tier: number; // 1..5
+  feature: FeatureKind;
+  locationKey?: string;
+  enemyKey?: string;
+  hazard?: HazardKind;
+  icon: string;
+  label: string;
+}
+
+export const MAX_TIER = 5;
+
+export function chebyshev(x: number, y: number): number {
+  return Math.max(Math.abs(x), Math.abs(y));
+}
+
+/** Distance → tier (risk/reward band). Every ~3 tiles steps up a tier. */
+export function tierForDistance(d: number): number {
+  return Math.max(1, Math.min(MAX_TIER, 1 + Math.floor(d / 3)));
+}
+
+/** Low-frequency biome regions (4x4 cells), drifting irradiated as you go out. */
+function biomeAt(seed: number, x: number, y: number, tier: number): Biome {
+  const rng = mulberry32(hashSeed(seed + 7, Math.floor(x / 4), Math.floor(y / 4)));
+  const radWeight = 1 + tier; // irradiated zones grow common deeper out
+  return weighted<Biome>(rng, [
+    ["WASTES", 5],
+    ["FOREST", 4],
+    ["URBAN", 4],
+    ["INDUSTRIAL", 3],
+    ["IRRADIATED", radWeight],
+  ]);
+}
+
+export function tileAt(seed: number, x: number, y: number): Tile {
+  const d = chebyshev(x, y);
+  const tier = tierForDistance(d);
+  const biome = biomeAt(seed, x, y, tier);
+
+  if (d === 0) {
+    return { x, y, biome, tier, feature: "EXIT", icon: "🏠", label: "Shelter Exit" };
+  }
+
+  const rng = tileRng(seed, x, y);
+
+  // Feature distribution shifts toward danger + density with tier.
+  const feature = weighted<FeatureKind>(rng, [
+    ["EMPTY", Math.max(18, 60 - tier * 8)],
+    ["LOOT", 18 + tier * 3],
+    ["ENEMY", 10 + tier * 5],
+    ["HAZARD", biome === "IRRADIATED" ? 10 + tier * 3 : 3 + tier],
+    ["CACHE", 4],
+  ]);
+
+  if (feature === "LOOT") {
+    const candidates = LOCATION_KEYS.filter((k) => (k !== "bunker" || tier >= 3) && (k !== "checkpoint" || tier >= 2));
+    const locationKey = pick(rng, candidates);
+    const loc = LOCATIONS[locationKey];
+    return { x, y, biome, tier, feature, locationKey, icon: loc.icon, label: loc.name };
+  }
+  if (feature === "ENEMY") {
+    const candidates = ENEMY_KEYS.filter((k) => ENEMIES[k].minTier <= tier);
+    const enemyKey = pick(rng, candidates);
+    return { x, y, biome, tier, feature, enemyKey, icon: ENEMIES[enemyKey].icon, label: ENEMIES[enemyKey].name };
+  }
+  if (feature === "HAZARD") {
+    const hazard: HazardKind = biome === "IRRADIATED" || chance(rng, 0.6) ? "RADIATION" : "TOXIC";
+    return { x, y, biome, tier, feature, hazard, icon: hazard === "RADIATION" ? "☢️" : "🧪", label: hazard === "RADIATION" ? "Radiation Zone" : "Toxic Spill" };
+  }
+  if (feature === "CACHE") {
+    return { x, y, biome, tier, feature, icon: "📦", label: "Hidden Cache" };
+  }
+  return { x, y, biome, tier, feature: "EMPTY", icon: BIOMES[biome].char, label: BIOMES[biome].name };
+}
+
+/** Draw loot from a table, gated by tier; quantities scale with tier. */
+export function generateLoot(rng: Rng, table: LootTable, tier: number, draws: [number, number]): LootDrop[] {
+  const pool = table.filter(([k]) => (ITEM_DEFS[k]?.tier ?? 99) <= tier);
+  if (!pool.length) return [];
+  const n = randInt(rng, draws[0], draws[1]) + Math.floor(tier / 2);
+  const merged = new Map<string, LootDrop>();
+  for (let i = 0; i < n; i++) {
+    const key = weighted(rng, pool);
+    const def = ITEM_DEFS[key];
+    if (!def) continue;
+    if (def.stackable) {
+      const qty = randInt(rng, 1, 2 + tier);
+      const cur = merged.get(key);
+      if (cur) cur.quantity += qty;
+      else merged.set(key, { defKey: key, quantity: qty, durability: null });
+    } else {
+      // Non-stackables are distinct rolls (each its own instance).
+      merged.set(`${key}#${i}`, { defKey: key, quantity: 1, durability: def.maxDurability ?? null });
+    }
+  }
+  return [...merged.values()];
+}
+
+/** Loot for a location tile. */
+export function lootForTile(seed: number, tile: Tile): LootDrop[] {
+  if (tile.feature === "LOOT" && tile.locationKey) {
+    const loc = LOCATIONS[tile.locationKey];
+    const rng = tileRng(seed, tile.x, tile.y);
+    rng(); // advance past the feature roll
+    return generateLoot(rng, loc.loot, tile.tier, loc.draws);
+  }
+  if (tile.feature === "CACHE") {
+    const rng = tileRng(seed, tile.x * 3 + 1, tile.y * 3 + 1);
+    return generateLoot(rng, [["ration", 4], ["water_bottle", 4], ["bandage", 3], ["scrap", 3], ["ammo", 3]], tile.tier, [1, 2]);
+  }
+  return [];
+}
+
+export interface EnemyInstance {
+  key: string;
+  name: string;
+  icon: string;
+  power: number;
+  hpHit: number;
+  fleeable: number;
+}
+
+/** Build a scaled enemy for a tile (power/damage grow with tier). */
+export function enemyForTile(tile: Tile): EnemyInstance | null {
+  if (tile.feature !== "ENEMY" || !tile.enemyKey) return null;
+  const def = ENEMIES[tile.enemyKey];
+  const scale = 1 + (tile.tier - 1) * 0.35;
+  return {
+    key: def.key,
+    name: def.name,
+    icon: def.icon,
+    power: Math.round(def.power * scale),
+    hpHit: Math.round(def.hpHit * scale),
+    fleeable: def.fleeable,
+  };
+}

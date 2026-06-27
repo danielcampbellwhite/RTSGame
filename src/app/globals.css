@@ -1,16 +1,18 @@
 @import "tailwindcss";
-/* maplibre-gl CSS is imported from the WorldMap component so the canvas sizes
-   correctly even if global CSS resolution differs in production. */
 
 :root {
-  --wd-bg: #04060a;
-  --wd-panel: #0a0f1a;
-  --wd-border: #14304a;
-  --wd-cyan: #22d3ee;
-  --wd-magenta: #f0f;
-  --wd-amber: #fbbf24;
-  --wd-red: #ef4444;
-  --wd-green: #34d399;
+  --bg: #0c0a08;
+  --panel: #16120d;
+  --panel-2: #1f1813;
+  --border: #3a2f23;
+  --ink: #e8ddcb; /* primary text — bone */
+  --ink-dim: #b6a489;
+  --rust: #c2521f; /* primary accent — rust/orange */
+  --amber: #e0a32e;
+  --tox: #8fbf3f; /* radiation / toxic green */
+  --blood: #b13838;
+  --steel: #7f8a92;
+  --good: #7bbf5a;
 }
 
 html,
@@ -20,16 +22,17 @@ body {
   max-width: 100vw;
   margin: 0;
   padding: 0;
-  background: var(--wd-bg);
-  color: #cbe7f5;
+  background:
+    radial-gradient(120% 100% at 50% 0%, #171210 0%, var(--bg) 70%);
+  color: var(--ink);
   font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   overflow: hidden;
   overscroll-behavior: none;
 }
 
-/* Scale the whole UI up ~150% (rem-based sizing scales together). */
+/* Scale the UI up for readability on phones. */
 html {
-  font-size: 150%;
+  font-size: 132%;
 }
 
 *,
@@ -38,126 +41,101 @@ html {
   box-sizing: border-box;
 }
 
-.neon-text {
-  text-shadow: 0 0 6px currentColor;
-}
-
 .panel {
-  background: linear-gradient(180deg, rgba(10, 15, 26, 0.92), rgba(4, 6, 10, 0.92));
-  border: 1px solid var(--wd-border);
-  backdrop-filter: blur(6px);
+  background: linear-gradient(180deg, var(--panel-2), var(--panel));
+  border: 1px solid var(--border);
 }
 
-.glow-border {
-  box-shadow: 0 0 12px rgba(34, 211, 238, 0.25), inset 0 0 12px rgba(34, 211, 238, 0.08);
+.inset {
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid var(--border);
 }
 
-/* Thin neon scrollbars for the panels & feed. */
+.title {
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+}
+
+.stamp {
+  text-shadow: 0 0 6px rgba(194, 82, 31, 0.5);
+}
+
+/* Tactile, stenciled buttons. */
+.btn {
+  border: 1px solid var(--border);
+  background: linear-gradient(180deg, var(--panel-2), var(--panel));
+  color: var(--ink);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  transition: border-color 0.12s, color 0.12s, background 0.12s;
+}
+.btn:hover:not(:disabled) {
+  border-color: var(--rust);
+  color: #ffd9a8;
+}
+.btn:disabled {
+  opacity: 0.4;
+}
+.btn-danger:hover:not(:disabled) {
+  border-color: var(--blood);
+  color: #ffb4b4;
+}
+.btn-go:hover:not(:disabled) {
+  border-color: var(--tox);
+  color: #d8f3a8;
+}
+
+/* Resource / vital meters. */
+.meter {
+  height: 6px;
+  background: rgba(0, 0, 0, 0.5);
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.meter > i {
+  display: block;
+  height: 100%;
+}
+
 .scroll-thin::-webkit-scrollbar {
-  width: 6px;
+  width: 7px;
+  height: 7px;
 }
 .scroll-thin::-webkit-scrollbar-thumb {
-  background: var(--wd-border);
+  background: var(--border);
   border-radius: 3px;
 }
 
+@keyframes flicker {
+  0%, 100% { opacity: 1; }
+  92% { opacity: 1; }
+  94% { opacity: 0.55; }
+  96% { opacity: 1; }
+}
+.flicker {
+  animation: flicker 4s linear infinite;
+}
+
 @keyframes pulse-dot {
-  0%,
-  100% {
-    opacity: 0.5;
-    transform: scale(0.9);
-  }
-  50% {
-    opacity: 1;
-    transform: scale(1.15);
-  }
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
 }
 .pulse {
-  animation: pulse-dot 2s ease-in-out infinite;
+  animation: pulse-dot 1.6s ease-in-out infinite;
 }
 
-.maplibregl-ctrl-attrib,
-.maplibregl-ctrl-logo {
-  opacity: 0.4;
-}
-
-/* Neon hover label */
-.wd-popup .maplibregl-popup-content {
-  background: rgba(4, 6, 10, 0.9);
-  border: 1px solid var(--wd-border);
-  color: var(--wd-cyan);
-  font-size: 11px;
-  padding: 2px 8px;
-  border-radius: 4px;
-  box-shadow: 0 0 8px rgba(34, 211, 238, 0.3);
-}
-.wd-popup .maplibregl-popup-tip {
-  display: none;
-}
-
-/* Zone overview card (popup over the map). */
-.wd-overview .maplibregl-popup-content {
-  background: rgba(6, 12, 20, 0.95);
-  border: 1px solid var(--wd-cyan);
-  border-radius: 6px;
-  padding: 8px 10px;
-  color: #cbe7f5;
-  box-shadow: 0 0 14px rgba(34, 211, 238, 0.35);
-  font-size: 11px;
-  min-width: 170px;
-}
-.wd-overview .maplibregl-popup-tip {
-  border-top-color: var(--wd-cyan);
-  border-bottom-color: var(--wd-cyan);
-}
-.wd-overview .maplibregl-popup-close-button {
-  color: var(--wd-cyan);
-  font-size: 16px;
-  padding: 0 5px;
-}
-.wd-ov-title {
-  font-weight: 700;
-  color: var(--wd-cyan);
-  text-shadow: 0 0 6px currentColor;
-}
-.wd-ov-sub {
-  font-size: 9px;
-  text-transform: uppercase;
-  letter-spacing: 0.12em;
-  color: rgb(165 243 252 / 0.6);
-  margin-bottom: 5px;
-}
-.wd-ov-row {
-  display: flex;
-  justify-content: space-between;
-  gap: 8px;
-  margin-top: 3px;
-}
-.wd-ov-bar {
-  height: 3px;
-  background: var(--wd-border);
-  border-radius: 2px;
-  margin-top: 2px;
-}
-.wd-ov-bar i {
-  display: block;
-  height: 100%;
-  border-radius: 2px;
-}
-.wd-ov-hint {
-  margin-top: 6px;
-  font-size: 9px;
-  color: rgb(165 243 252 / 0.5);
-}
-
-/* Zoom-in country name labels (DOM markers). */
-.wd-country-label {
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  color: #e7fbff;
-  text-shadow: 0 0 4px #000, 0 0 6px #000;
-  white-space: nowrap;
+/* Faint scanline / grime overlay hook for the wasteland mode. */
+.grime::after {
+  content: "";
+  position: absolute;
+  inset: 0;
   pointer-events: none;
-  text-transform: uppercase;
+  background: repeating-linear-gradient(
+    0deg,
+    rgba(0, 0, 0, 0.12) 0px,
+    rgba(0, 0, 0, 0) 2px,
+    rgba(0, 0, 0, 0) 4px
+  );
+  mix-blend-mode: multiply;
 }

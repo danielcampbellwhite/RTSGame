@@ -2,8 +2,8 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "World Dominion",
-  description: "A persistent real-time geopolitical grand strategy game.",
+  title: "Aftermath",
+  description: "Prepare at the shelter. Raid the wasteland. Return alive.",
 };
 
 export const viewport: Viewport = {
@@ -12,7 +12,7 @@ export const viewport: Viewport = {
   maximumScale: 1,
   userScalable: false,
   viewportFit: "cover",
-  themeColor: "#04060a",
+  themeColor: "#0c0a08",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
