@@ -44,15 +44,15 @@ export function Btn({
   );
 }
 
-export function Meter({ label, value, max, color }: { label: string; value: number; max: number; color: string }) {
+export function Meter({ label, value, max, color, critical }: { label: string; value: number; max: number; color: string; critical?: boolean }) {
   const pct = Math.max(0, Math.min(100, (value / max) * 100));
   return (
-    <div className="text-[10px]">
+    <div className={`text-[10px] ${critical ? "pulse" : ""}`}>
       <div className="flex justify-between text-[var(--ink-dim)]">
-        <span className="title">{label}</span>
+        <span className="title" style={critical ? { color } : undefined}>{label}</span>
         <span style={{ color }}>{Math.round(value)}{max === 100 ? "" : `/${max}`}</span>
       </div>
-      <div className="meter mt-0.5">
+      <div className="meter mt-0.5" style={critical ? { borderColor: color, boxShadow: `0 0 6px ${color}` } : undefined}>
         <i style={{ width: `${pct}%`, background: color }} />
       </div>
     </div>

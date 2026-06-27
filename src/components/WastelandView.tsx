@@ -19,26 +19,31 @@ export default function WastelandView() {
   const blocked = !!exp.pending || isPending;
 
   return (
-    <div className="grime relative flex h-full w-full flex-col gap-2 overflow-hidden p-2">
+    <div className="grime relative flex h-full w-full flex-col gap-2 overflow-y-auto scroll-thin p-2">
       {/* HUD */}
       <div className="panel rounded p-2">
         <div className="flex items-center justify-between text-[10px]">
-          <span className="title text-[var(--rust)]">{exp.conditionIcon} {exp.conditionName}</span>
+          <span className="title text-[var(--amber)]" title={exp.conditionNote}>{exp.conditionIcon} {exp.conditionName}</span>
           <span className="text-[var(--ink-dim)]">{exp.biomeName} · {exp.distance} out · T{exp.tier}</span>
         </div>
-        <div className="mt-0.5 text-[9px] text-[var(--ink-dim)]">
-          {exp.territoryName ? `Territory: ${exp.territoryName} · ${exp.territoryStanding}` : "Territory: unclaimed wastes"}
+        <div className="mt-0.5 text-[9px]">
+          <span className="text-[var(--ink-dim)]">Territory: </span>
+          {exp.territoryName ? (
+            <span>{exp.territoryName} <span className="text-[var(--ink-dim)]">· {exp.territoryStanding}</span></span>
+          ) : (
+            <span className="text-[var(--ink-dim)]">unclaimed wastes</span>
+          )}
         </div>
         <div className="mt-2 grid grid-cols-3 gap-2">
-          <Meter label="Health" value={player.health} max={player.maxHealth} color="#b13838" />
-          <Meter label="Stamina" value={player.stamina} max={100} color="#e0a32e" />
-          <Meter label="Radiation" value={player.radiation} max={100} color="#8fbf3f" />
+          <Meter label="Health" value={player.health} max={player.maxHealth} color="#b13838" critical={player.health <= player.maxHealth * 0.3} />
+          <Meter label="Stamina" value={player.stamina} max={100} color="#e0a32e" critical={player.stamina <= 15} />
+          <Meter label="Radiation" value={player.radiation} max={100} color="#8fbf3f" critical={player.radiation >= 60} />
         </div>
       </div>
 
       {/* Map with environmental backdrop */}
-      <div className="wasteland-bg panel relative min-h-0 flex-1 overflow-hidden rounded p-3" style={{ ["--biome" as string]: exp.biomeColor }}>
-        <div className="relative mx-auto grid h-full w-full max-w-[420px] gap-[3px]" style={{ gridTemplateColumns: `repeat(${cols}, 1fr)` }}>
+      <div className="wasteland-bg panel relative shrink-0 overflow-hidden rounded p-3" style={{ ["--biome" as string]: exp.biomeColor, height: "min(46vw, 300px)" }}>
+        <div className="relative mx-auto grid gap-[2px]" style={{ gridTemplateColumns: `repeat(${cols}, 1fr)`, aspectRatio: "1 / 1", height: "100%" }}>
           {exp.tiles.map((t) => {
             let bg = "transparent";
             let border = "1px solid rgba(255,255,255,0.04)";

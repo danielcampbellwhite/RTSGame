@@ -55,9 +55,9 @@ export default function ShelterView() {
             <div className="title text-[10px] text-[var(--tox)] stamp">◢ SHELTER ◣</div>
           </div>
           <div className="mt-2 grid grid-cols-3 gap-2">
-            <Meter label="Health" value={player.health} max={player.maxHealth} color="#b13838" />
+            <Meter label="Health" value={player.health} max={player.maxHealth} color="#b13838" critical={player.health <= player.maxHealth * 0.3} />
             <Meter label="Stamina" value={player.stamina} max={100} color="#e0a32e" />
-            <Meter label="Radiation" value={player.radiation} max={100} color="#8fbf3f" />
+            <Meter label="Radiation" value={player.radiation} max={100} color="#8fbf3f" critical={player.radiation >= 60} />
           </div>
         </div>
       </div>
@@ -84,6 +84,11 @@ export default function ShelterView() {
             );
           })}
         </div>
+        {(shelter.food <= 0 || shelter.water <= 0) && (
+          <div className="mt-1 text-center text-[10px] text-[var(--blood)] pulse">
+            ⚠ {shelter.food <= 0 && shelter.water <= 0 ? "Out of food & water" : shelter.food <= 0 ? "Out of food" : "Out of water"} — morale is collapsing. Scavenge or assign crew.
+          </div>
+        )}
       </div>
 
       {snap.flash && (
