@@ -2,8 +2,8 @@
 
 import { prisma } from "@/lib/db";
 import { Prisma } from "@prisma/client";
-import { ITEM_DEFS, STARTER_ITEMS, type ItemDef } from "@/data/items";
-import { RECIPES, upgradeCost, type Station } from "@/data/recipes";
+import { ITEM_DEFS, type ItemDef } from "@/data/items";
+import { RECIPES, upgradeCost, stationLevelReq, type Station } from "@/data/recipes";
 import {
   SURV,
   depleteResources,
@@ -149,10 +149,11 @@ async function loadSnapshot(playerId: string, flash: string | null = null): Prom
   if (player.state === "IN_EXPEDITION") {
     const exp = await prisma.expedition.findFirst({ where: { playerId, status: "ACTIVE" } });
     if (exp) {
+      // Entered tiles show their contents. Adjacent tiles are only "scouted":
+      // you can see the terrain you could step into, but not what's there yet.
       const visited = new Set((exp.visited as unknown as string[]) ?? []);
-      const reveal = new Set(visited);
-      reveal.add(`${exp.posX},${exp.posY}`);
-      for (const [dx, dy] of [[0, -1], [0, 1], [-1, 0], [1, 0]]) reveal.add(`${exp.posX + dx},${exp.posY + dy}`);
+      const scouted = new Set<string>();
+      for (const [dx, dy] of [[0, -1], [0, 1], [-1, 0], [1, 0]]) scouted.add(`${exp.posX + dx},${exp.posY + dy}`);
 
       const tiles: TileView[] = [];
       for (let dy = -WINDOW_RADIUS; dy <= WINDOW_RADIUS; dy++) {
@@ -161,8 +162,8 @@ async function loadSnapshot(playerId: string, flash: string | null = null): Prom
           const y = exp.posY + dy;
           const key = `${x},${y}`;
           const isExit = x === 0 && y === 0;
-          if (reveal.has(key) || isExit) {
-            const t = tileAt(exp.seed, x, y);
+          const t = tileAt(exp.seed, x, y);
+          if (visited.has(key) || isExit) {
             tiles.push({
               x, y, revealed: true,
               icon: t.icon, label: t.label, feature: t.feature,
@@ -170,6 +171,9 @@ async function loadSnapshot(playerId: string, flash: string | null = null): Prom
               isPlayer: dx === 0 && dy === 0,
               isExit,
             });
+          } else if (scouted.has(key)) {
+            // terrain tint only — contents hidden
+            tiles.push({ x, y, revealed: false, scouted: true, color: BIOMES[t.biome].color, isExit });
           } else {
             tiles.push({ x, y, revealed: false, isExit });
           }
@@ -187,6 +191,8 @@ async function loadSnapshot(playerId: string, flash: string | null = null): Prom
         tier: tierForDistance(chebyshev(exp.posX, exp.posY)),
         tiles,
         windowRadius: WINDOW_RADIUS,
+        biomeColor: BIOMES[cur.biome].color,
+        biomeName: BIOMES[cur.biome].name,
         log: ((exp.log as unknown as string[]) ?? []).slice(0, 8),
         backpack: backpack.map(itemView),
         backpackUsed: backpack.reduce((n, b) => n + b.quantity, 0),
@@ -239,25 +245,20 @@ async function loadSnapshot(playerId: string, flash: string | null = null): Prom
 // ── lifecycle ──────────────────────────────────────────────────────────────────
 
 export async function createPlayer(name: string): Promise<{ playerId: string }> {
+  // You start with nothing — no gear, no stores, no stations. Everything must
+  // be scavenged from the wasteland.
   const player = await prisma.player.create({
     data: {
       name: name.trim().slice(0, 24) || "Survivor",
-      shelter: { create: {} },
+      shelter: {
+        create: {
+          food: 0, water: 0, meds: 0, ammo: 0, scrap: 0, fuel: 0,
+          morale: 60,
+          workshopLvl: 0, medicalLvl: 0, ammoBenchLvl: 0, weaponBenchLvl: 0,
+        },
+      },
     },
   });
-  for (const it of STARTER_ITEMS) {
-    const def = ITEM_DEFS[it.defKey];
-    await prisma.itemStack.create({
-      data: {
-        playerId: player.id,
-        defKey: it.defKey,
-        quantity: it.quantity,
-        durability: def?.maxDurability ?? null,
-        location: "STORAGE",
-        equippedSlot: it.equip ?? null,
-      },
-    });
-  }
   return { playerId: player.id };
 }
 
@@ -330,7 +331,15 @@ export async function upgrade(playerId: string, target: Station | "storage" | "s
   const sh = player.shelter;
 
   const field = target === "storage" || target === "shelter" ? null : (`${target}Lvl` as const);
+  const isStation = field !== null;
   const curLevel = target === "shelter" ? sh.level : target === "storage" ? Math.floor((sh.storageCap - 240) / 60) + 1 : (sh as unknown as Record<string, number>)[field!] ?? 0;
+
+  // Crafting stations are locked behind survivor rank — scavenge first, build later.
+  if (isStation) {
+    const req = stationLevelReq(curLevel + 1);
+    if (player.level < req) return loadSnapshot(playerId, `Requires survivor level ${req} to build/upgrade this station.`);
+  }
+
   const cost = upgradeCost(curLevel + 1);
   if (sh.scrap < cost.scrap || sh.fuel < cost.fuel) return loadSnapshot(playerId, `Need ${cost.scrap} scrap & ${cost.fuel} fuel.`);
 
@@ -501,6 +510,14 @@ export async function useConsumable(playerId: string, itemId: string): Promise<G
   if (!player || !item) return loadSnapshot(playerId);
   const def = ITEM_DEFS[item.defKey];
   if (!def || def.category !== "CONSUMABLE") return loadSnapshot(playerId);
+
+  // Don't let the player waste a consumable that would do nothing right now.
+  const wouldHeal = (def.heal ?? 0) > 0 && player.health < player.maxHealth;
+  const wouldRad = (def.reduceRad ?? 0) > 0 && player.radiation > 0;
+  const wouldStam = (def.restoreStamina ?? 0) > 0 && player.stamina < 100;
+  if (!wouldHeal && !wouldRad && !wouldStam) {
+    return loadSnapshot(playerId, `No need for ${def.name} right now.`);
+  }
 
   const health = clamp(player.health + (def.heal ?? 0), 0, player.maxHealth);
   const radiation = clamp(player.radiation - (def.reduceRad ?? 0));

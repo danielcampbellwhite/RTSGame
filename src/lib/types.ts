@@ -20,7 +20,8 @@ export interface ItemView {
 export interface TileView {
   x: number;
   y: number;
-  revealed: boolean;
+  revealed: boolean; // entered — contents known
+  scouted?: boolean; // adjacent — terrain visible, contents hidden
   icon?: string;
   label?: string;
   feature?: string;
@@ -48,6 +49,8 @@ export interface ExpeditionView {
   tier: number;
   tiles: TileView[]; // window around the player
   windowRadius: number;
+  biomeColor: string;
+  biomeName: string;
   log: string[];
   backpack: ItemView[];
   backpackUsed: number;

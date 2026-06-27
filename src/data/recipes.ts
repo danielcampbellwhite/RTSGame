@@ -23,7 +23,13 @@ export const RECIPES: Recipe[] = [
   { key: "make_vest", name: "Kevlar Vest", station: "workshop", stationLvl: 2, resources: { scrap: 8 }, items: [{ defKey: "cloth", qty: 3 }], output: { defKey: "vest", qty: 1 } },
 ];
 
-// Upgrade costs (scrap/fuel/meds) by target level.
+// Upgrade costs (scrap/fuel) by target level.
 export function upgradeCost(targetLevel: number): { scrap: number; fuel: number } {
   return { scrap: 10 * targetLevel, fuel: 3 * targetLevel };
+}
+
+/** Survivor level required to build/upgrade a crafting station to `targetLevel`.
+ *  Crafting is gated behind progression — early on you must scavenge gear. */
+export function stationLevelReq(targetLevel: number): number {
+  return 1 + targetLevel * 2; // L1 → lvl 3, L2 → lvl 5, L3 → lvl 7 …
 }

@@ -2,9 +2,19 @@
 
 import { useState } from "react";
 import { useGame } from "@/store/game";
-import { Btn, Meter, ResourceChip, useAction } from "@/components/ui";
+import { Btn, Meter, useAction } from "@/components/ui";
 import { startExpedition, equipItem, unequipItem, useConsumable, craft, upgrade } from "@/app/actions";
+import { stationLevelReq } from "@/data/recipes";
 import type { ItemView } from "@/lib/types";
+
+const RES: { k: "food" | "water" | "meds" | "ammo" | "scrap" | "fuel"; name: string; icon: string }[] = [
+  { k: "food", name: "Food", icon: "🥫" },
+  { k: "water", name: "Water", icon: "🚰" },
+  { k: "meds", name: "Meds", icon: "💊" },
+  { k: "ammo", name: "Ammo", icon: "🧨" },
+  { k: "scrap", name: "Scrap", icon: "🔩" },
+  { k: "fuel", name: "Fuel", icon: "⛽" },
+];
 
 type Tab = "loadout" | "craft" | "build";
 
@@ -42,15 +52,27 @@ export default function ShelterView() {
         </div>
       </div>
 
-      {/* Resources */}
+      {/* Shelter stores — clearly labelled; these are the PERMANENT stockpile
+          (not carried gear) and slowly deplete over time. */}
       <div className="panel rounded p-2">
-        <div className="flex flex-wrap items-center gap-1.5">
-          {(["food", "water", "meds", "ammo", "scrap", "fuel"] as const).map((k) => (
-            <ResourceChip key={k} k={k} value={shelter[k]} />
-          ))}
-          <div className="ml-auto text-[10px] text-[var(--ink-dim)]">
-            Morale {Math.round(shelter.morale)} · Storage {shelter.storedCount}/{shelter.storageCap}
-          </div>
+        <div className="title mb-1 flex items-center justify-between text-[9px] text-[var(--ink-dim)]">
+          <span>Shelter Stores · deplete over time</span>
+          <span>Morale {Math.round(shelter.morale)} · Storage {shelter.storedCount}/{shelter.storageCap}</span>
+        </div>
+        <div className="grid grid-cols-3 gap-1.5">
+          {RES.map(({ k, name, icon }) => {
+            const v = shelter[k];
+            const low = v < 15;
+            return (
+              <div key={k} className="inset flex items-center gap-1.5 rounded px-2 py-1">
+                <span className="text-base">{icon}</span>
+                <div className="leading-tight">
+                  <div className="title text-[9px] text-[var(--ink-dim)]">{name}</div>
+                  <div className="text-sm" style={{ color: low ? "var(--blood)" : "var(--ink)" }}>{Math.round(v)}</div>
+                </div>
+              </div>
+            );
+          })}
         </div>
       </div>
 
@@ -99,13 +121,30 @@ export default function ShelterView() {
         )}
         {tab === "build" && (
           <div className="space-y-1 text-xs">
-            <UpgradeRow label={`Storage (+60 cap)`} onClick={() => run(() => upgrade(player.id, "storage"))} busy={isPending} note={`cap ${shelter.storageCap}`} />
-            <UpgradeRow label={`Shelter level`} onClick={() => run(() => upgrade(player.id, "shelter"))} busy={isPending} note={`L${shelter.level}`} />
-            <UpgradeRow label={`Workshop`} onClick={() => run(() => upgrade(player.id, "workshop"))} busy={isPending} note={`L${shelter.workshopLvl}`} />
-            <UpgradeRow label={`Medical Station`} onClick={() => run(() => upgrade(player.id, "medical"))} busy={isPending} note={`L${shelter.medicalLvl}`} />
-            <UpgradeRow label={`Ammo Bench`} onClick={() => run(() => upgrade(player.id, "ammoBench"))} busy={isPending} note={`L${shelter.ammoBenchLvl}`} />
-            <UpgradeRow label={`Weapon Bench`} onClick={() => run(() => upgrade(player.id, "weaponBench"))} busy={isPending} note={`L${shelter.weaponBenchLvl}`} />
-            <p className="pt-1 text-[10px] text-[var(--ink-dim)]">Upgrades cost scrap &amp; fuel, scaling with level.</p>
+            <UpgradeRow label="Storage (+60 cap)" onClick={() => run(() => upgrade(player.id, "storage"))} busy={isPending} note={`cap ${shelter.storageCap}`} />
+            <UpgradeRow label="Shelter level" onClick={() => run(() => upgrade(player.id, "shelter"))} busy={isPending} note={`L${shelter.level}`} />
+            {([
+              { label: "Workshop", t: "workshop" as const, lvl: shelter.workshopLvl },
+              { label: "Medical Station", t: "medical" as const, lvl: shelter.medicalLvl },
+              { label: "Ammo Bench", t: "ammoBench" as const, lvl: shelter.ammoBenchLvl },
+              { label: "Weapon Bench", t: "weaponBench" as const, lvl: shelter.weaponBenchLvl },
+            ]).map((s) => {
+              const req = stationLevelReq(s.lvl + 1);
+              const locked = player.level < req;
+              return (
+                <UpgradeRow
+                  key={s.t}
+                  label={s.label}
+                  onClick={() => run(() => upgrade(player.id, s.t))}
+                  busy={isPending}
+                  locked={locked}
+                  note={locked ? `L${s.lvl} · 🔒 needs rank ${req}` : `L${s.lvl}`}
+                />
+              );
+            })}
+            <p className="pt-1 text-[10px] text-[var(--ink-dim)]">
+              Crafting stations unlock with your survivor rank, then cost scrap &amp; fuel to build/upgrade.
+            </p>
           </div>
         )}
       </div>
@@ -213,14 +252,14 @@ function Empty({ children }: { children: React.ReactNode }) {
   return <div className="px-1 py-2 text-[10px] text-[var(--ink-dim)]">{children}</div>;
 }
 
-function UpgradeRow({ label, note, onClick, busy }: { label: string; note: string; onClick: () => void; busy: boolean }) {
+function UpgradeRow({ label, note, onClick, busy, locked }: { label: string; note: string; onClick: () => void; busy: boolean; locked?: boolean }) {
   return (
     <div className="inset flex items-center justify-between rounded px-2 py-1.5">
       <div>
         <div>{label}</div>
-        <div className="text-[10px] text-[var(--ink-dim)]">current {note}</div>
+        <div className="text-[10px]" style={{ color: locked ? "var(--blood)" : "var(--ink-dim)" }}>{note}</div>
       </div>
-      <Btn disabled={busy} onClick={onClick}>Upgrade</Btn>
+      <Btn disabled={busy || locked} onClick={onClick}>{locked ? "Locked" : "Upgrade"}</Btn>
     </div>
   );
 }
