@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useGame } from "@/store/game";
 import { Btn, Meter, useAction } from "@/components/ui";
-import { move, resolveEncounter, returnHome, useConsumable, interact, recruitSurvivor, trade, helpInjured, takeGroundItem, takeAllGround, dropItem, type Dir } from "@/app/actions";
+import { move, resolveEncounter, leaveZone, useConsumable, interact, recruitSurvivor, trade, helpInjured, takeGroundItem, takeAllGround, dropItem, type Dir } from "@/app/actions";
 import type { GameSnapshot } from "@/lib/types";
 
 export default function WastelandView() {
@@ -24,7 +24,7 @@ export default function WastelandView() {
       <div className="panel rounded p-2">
         <div className="flex items-center justify-between text-[0.66rem]">
           <span className="title text-[var(--amber)]" title={exp.conditionNote}>{exp.conditionIcon} {exp.conditionName}</span>
-          <span className="text-[var(--ink-dim)]">{exp.biomeName} · {exp.distance} out · T{exp.tier}</span>
+          <span className="text-[var(--ink-dim)]">{exp.zoneName} · T{exp.tier}</span>
         </div>
         <div className="mt-0.5 text-[0.58rem]">
           <span className="text-[var(--ink-dim)]">Territory: </span>
@@ -227,8 +227,8 @@ export default function WastelandView() {
             <Btn disabled={blocked || exp.searchedHere} onClick={() => run(() => interact(player.id, "search"))}>{exp.searchedHere ? "Searched" : "Search"}</Btn>
             <Btn disabled={blocked} onClick={() => run(() => interact(player.id, "rest"))}>Rest</Btn>
           </div>
-          <Btn variant="go" disabled={isPending || !!exp.pending} onClick={() => run(() => returnHome(player.id))} className="py-1.5">
-            ⌂ Return {exp.distance > 0 ? `(${exp.distance} out)` : ""}
+          <Btn variant="go" disabled={isPending || !!exp.pending} onClick={() => run(() => leaveZone(player.id))} className="py-1.5">
+            ↩ Leave Zone
           </Btn>
         </div>
       </div>
@@ -304,7 +304,7 @@ function Terminal({ snap, run, disabled }: { snap: GameSnapshot; run: (fn: () =>
       if (pk === "survivor") return run(() => recruitSurvivor(player.id, false));
       if (pk === "trader") return run(() => trade(player.id, { type: "leave" }));
       if (pk === "injured") return run(() => helpInjured(player.id, false));
-      run(() => returnHome(player.id));
+      run(() => leaveZone(player.id));
     } else if (["look", "l", "examine", "scan"].includes(verb)) {
       run(() => interact(player.id, "look"));
     } else if (verb === "search") {

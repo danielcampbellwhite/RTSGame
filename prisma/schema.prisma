@@ -136,6 +136,7 @@ model Expedition {
   seed      Int // deterministic world generation for this run
   status    ExpeditionStatus @default(ACTIVE)
   condition String           @default("CLEAR") // the run's weather/threat condition
+  zoneKey   String? // current zone being explored; null = on the overview city map
 
   // Position on the region grid (shelter exit = 0,0).
   posX     Int @default(0)

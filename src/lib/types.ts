@@ -24,12 +24,35 @@ export interface TileView {
   visited?: boolean; // part of your trail
   spotted?: boolean; // seen from afar via look — contents known, not entered
   scouted?: boolean; // adjacent — terrain visible, contents hidden
+  edge?: boolean; // outside the zone bounds — impassable rubble
   icon?: string;
   label?: string;
   feature?: string;
   color?: string;
   isPlayer?: boolean;
   isExit?: boolean;
+}
+
+export interface OverviewZone {
+  key: string;
+  name: string;
+  type: string; // SAFE | POI | DANGER | WASTELAND
+  x: number; // 0–100 map %
+  y: number;
+  tier: number;
+  icon: string;
+  color: string;
+  faction: string | null;
+  standing: string | null;
+}
+
+export interface OverviewView {
+  conditionName: string;
+  conditionIcon: string;
+  conditionNote: string;
+  zones: OverviewZone[];
+  backpackCount: number;
+  carryCap: number;
 }
 
 export interface GroundItemView {
@@ -92,6 +115,9 @@ export interface ExpeditionView {
   tier: number;
   tiles: TileView[]; // window around the player
   windowRadius: number;
+  zoneName: string;
+  zoneType: string;
+  gridSize: number;
   biomeColor: string;
   biomeName: string;
   condition: string;
@@ -174,6 +200,7 @@ export interface GameSnapshot {
   equipped: Record<string, ItemView | null>;
   craftables: CraftableView[];
   factions: FactionStanding[];
-  expedition: ExpeditionView | null;
+  overview: OverviewView | null; // the city map (between zones)
+  expedition: ExpeditionView | null; // exploring a zone
   flash: string | null; // one-off message (e.g. death summary)
 }

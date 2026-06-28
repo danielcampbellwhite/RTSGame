@@ -56,12 +56,14 @@ function biomeAt(seed: number, x: number, y: number, tier: number): Biome {
   ]);
 }
 
-export function tileAt(seed: number, x: number, y: number): Tile {
+export function tileAt(seed: number, x: number, y: number, tierOverride?: number): Tile {
   const d = chebyshev(x, y);
-  const tier = tierForDistance(d);
+  const tier = tierOverride ?? tierForDistance(d);
   const biome = biomeAt(seed, x, y, tier);
 
-  if (d === 0) {
+  // Only the infinite-world origin is the shelter exit; inside a bounded zone
+  // (tierOverride set) every tile is explorable terrain.
+  if (tierOverride == null && d === 0) {
     return { x, y, biome, tier, feature: "EXIT", icon: "🏠", label: "Shelter Exit" };
   }
 
