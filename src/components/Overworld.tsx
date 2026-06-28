@@ -31,6 +31,7 @@ const STEP_MS = 150;        // tile-to-tile walk time
 const ENEMY_TICK_MS = 480;  // enemy decision cadence
 const AGGRO = 4;            // tiles within which enemies chase
 const SPAWN_R = 8;          // spawn enemies within this radius of the player
+const VIS_R = 5;            // how far the player can see (tiles)
 
 export default function Overworld() {
   const snap = useGame((s) => s.snapshot)!;
@@ -342,6 +343,22 @@ export default function Overworld() {
   );
 }
 
+// Bresenham line-of-sight: true if an opaque tile sits strictly between origin
+// and target (the target itself, e.g. a wall face, is not counted).
+function losBlocked(x0: number, y0: number, x1: number, y1: number, opaque: (x: number, y: number) => boolean): boolean {
+  const dx = Math.abs(x1 - x0), dy = Math.abs(y1 - y0);
+  const sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1;
+  let err = dx - dy, x = x0, y = y0;
+  for (let guard = 0; guard < 64; guard++) {
+    if (x === x1 && y === y1) return false;
+    if (!(x === x0 && y === y0) && opaque(x, y)) return true;
+    const e2 = 2 * err;
+    if (e2 > -dy) { err -= dy; x += sx; }
+    if (e2 < dx) { err += dx; y += sy; }
+  }
+  return false;
+}
+
 // ── canvas drawing ─────────────────────────────────────────────────────────
 function draw(ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement, st: EngineState, scene: Scene) {
   const cw = canvas.clientWidth, ch = canvas.clientHeight;
@@ -358,10 +375,21 @@ function draw(ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement, st: Engi
   const y0 = Math.floor(st.camY - ch / 2 / tile) - 1;
   const y1 = Math.ceil(st.camY + ch / 2 / tile) + 1;
 
+  // visibility: a circular radius around the player, with buildings blocking
+  // line of sight (you can't see past a wall).
+  const pxT = Math.round(st.px), pyT = Math.round(st.py);
+  const opaque = (x: number, y: number) => { const k = scene.cellAt(x, y).terrain; return k === "BUILDING" || k === "EDGE"; };
+  const visible = (x: number, y: number) => {
+    const dx = x - pxT, dy = y - pyT;
+    if (dx * dx + dy * dy > VIS_R * VIS_R) return false;
+    return !losBlocked(pxT, pyT, x, y, opaque);
+  };
+
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   for (let y = y0; y <= y1; y++) {
     for (let x = x0; x <= x1; x++) {
+      if (!visible(x, y)) continue; // beyond sight / behind a wall — stays dark
       const c = scene.cellAt(x, y);
       const px = sx(x), py = sy(y);
       ctx.fillStyle = TERRAIN_COLOR[c.terrain];
@@ -374,12 +402,19 @@ function draw(ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement, st: Engi
       // feature / structure icons
       const icon = c.terrain === "DOOR" || c.terrain === "SHELTER" || c.terrain === "EXIT" ? c.icon : c.feature === "LOOT" ? c.icon : null;
       if (icon) { ctx.font = `${Math.floor(tile * 0.62)}px serif`; ctx.fillText(icon, px + tile / 2, py + tile / 2 + 1); }
+      // soft darkening toward the edge of vision
+      const dd = (x - pxT) * (x - pxT) + (y - pyT) * (y - pyT);
+      if (dd > (VIS_R - 1.5) * (VIS_R - 1.5)) {
+        ctx.fillStyle = `rgba(11,10,8,${Math.min(0.6, (Math.sqrt(dd) - (VIS_R - 1.5)) / 2)})`;
+        ctx.fillRect(px, py, tile, tile);
+      }
     }
   }
 
-  // enemies
+  // enemies (only those within sight)
   ctx.font = `${Math.floor(tile * 0.66)}px serif`;
   for (const e of st.enemies.values()) {
+    if (!visible(Math.round(e.x), Math.round(e.y))) continue;
     const px = sx(e.x) + tile / 2, py = sy(e.y) + tile / 2;
     ctx.fillStyle = "rgba(130,40,40,0.5)";
     ctx.beginPath(); ctx.arc(px, py, tile * 0.42, 0, Math.PI * 2); ctx.fill();
