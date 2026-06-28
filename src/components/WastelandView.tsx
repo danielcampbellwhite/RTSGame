@@ -41,9 +41,11 @@ export default function WastelandView() {
         </div>
       </div>
 
-      {/* Map with environmental backdrop */}
-      <div className="wasteland-bg panel relative shrink-0 overflow-hidden rounded p-3" style={{ ["--biome" as string]: exp.biomeColor, height: "min(46vw, 300px)" }}>
-        <div className="relative mx-auto grid gap-[2px]" style={{ gridTemplateColumns: `repeat(${cols}, 1fr)`, aspectRatio: "1 / 1", height: "100%" }}>
+      {/* Map with environmental backdrop. The grid is a square sized to the
+          panel's height (centred), so the player stays dead-centre and no row
+          gets clipped. */}
+      <div className="wasteland-bg panel relative flex shrink-0 items-center justify-center overflow-hidden rounded p-2" style={{ ["--biome" as string]: exp.biomeColor, height: "min(82vw, 360px)" }}>
+        <div className="grid aspect-square h-full max-w-full gap-[2px]" style={{ gridTemplateColumns: `repeat(${cols}, 1fr)` }}>
           {exp.tiles.map((t) => {
             let bg = "transparent";
             let border = "1px solid rgba(255,255,255,0.04)";
