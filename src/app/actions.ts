@@ -988,7 +988,7 @@ export async function recruitSurvivor(playerId: string, accept: boolean): Promis
     log.unshift(`🤝 ${pending.name} will make their way to your shelter. Population +1.`);
   }
   const cleared = new Set((exp.cleared as unknown as string[]) ?? []);
-  cleared.add(`${exp.posX},${exp.posY}`); // they're gone either way
+  cleared.add(tkey(exp.zoneKey, exp.posX, exp.posY)); // they're gone either way
   await prisma.expedition.update({ where: { id: exp.id }, data: { log, cleared: [...cleared], pending: Prisma.DbNull } });
   revalidatePath("/");
   return loadSnapshot(playerId);
@@ -1058,7 +1058,7 @@ export async function helpInjured(playerId: string, accept: boolean): Promise<Ga
   await adjustRep(playerId, (player.factionRep as RepMap) ?? {}, hChanges);
   log.unshift(`🩹 You patch up ${pending.name}. (+5 reputation)${joins ? ` Grateful, ${pending.name} will head to your shelter.` : ""}`);
   const cleared = new Set((exp.cleared as unknown as string[]) ?? []);
-  cleared.add(`${exp.posX},${exp.posY}`);
+  cleared.add(tkey(exp.zoneKey, exp.posX, exp.posY));
   await prisma.expedition.update({ where: { id: exp.id }, data: { log, cleared: [...cleared], pending: Prisma.DbNull } });
   revalidatePath("/");
   return loadSnapshot(playerId);
@@ -1096,7 +1096,7 @@ export async function takeGroundItem(playerId: string, idx: number): Promise<Gam
   if (!exp) return loadSnapshot(playerId);
   if (exp.pending) return loadSnapshot(playerId, "Not while something's in your face.");
 
-  const key = `${exp.posX},${exp.posY}`;
+  const key = tkey(exp.zoneKey, exp.posX, exp.posY);
   const ground = ((exp.ground as unknown as Record<string, GroundEntry[]>) ?? {}) as Record<string, GroundEntry[]>;
   const list = ground[key] ?? [];
   const entry = list[idx];
@@ -1126,9 +1126,10 @@ export async function takeAllGround(playerId: string): Promise<GameSnapshot | nu
   if (!exp) return loadSnapshot(playerId);
   if (exp.pending) return loadSnapshot(playerId, "Not while something's in your face.");
 
-  const key = `${exp.posX},${exp.posY}`;
+  const key = tkey(exp.zoneKey, exp.posX, exp.posY);
   const ground = ((exp.ground as unknown as Record<string, GroundEntry[]>) ?? {}) as Record<string, GroundEntry[]>;
-  let list = ground[key] ?? [];
+  const list = ground[key] ?? [];
+  if (list.length === 0) return loadSnapshot(playerId, "Nothing here to pick up.");
   let remaining = await carryRemaining(playerId);
   let took = 0;
   const kept: GroundEntry[] = [];
@@ -1158,7 +1159,7 @@ export async function dropItem(playerId: string, itemId: string): Promise<GameSn
   const item = (await prisma.itemStack.findFirst({ where: { id: itemId, playerId, location: "BACKPACK" } })) as StackRow | null;
   if (!item) return loadSnapshot(playerId);
 
-  const key = `${exp.posX},${exp.posY}`;
+  const key = tkey(exp.zoneKey, exp.posX, exp.posY);
   const ground = ((exp.ground as unknown as Record<string, GroundEntry[]>) ?? {}) as Record<string, GroundEntry[]>;
   addToGround(ground, key, [{ defKey: item.defKey, quantity: item.quantity, durability: item.durability }]);
   await prisma.itemStack.delete({ where: { id: item.id } });
