@@ -217,7 +217,7 @@ export default function ShelterView() {
 
       {/* Embark */}
       <Btn variant="go" disabled={isPending} onClick={() => run(() => startExpedition(player.id))} className="w-full py-3 text-sm">
-        ☢ Enter the Wasteland
+        ☢ Head into the City
       </Btn>
       <SaveCode id={player.id} />
     </div>

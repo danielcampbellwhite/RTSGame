@@ -3,8 +3,10 @@
 import { useEffect, useRef, useState } from "react";
 import { useGame } from "@/store/game";
 import { Btn, Meter, useAction } from "@/components/ui";
-import { move, resolveEncounter, leaveZone, useConsumable, interact, recruitSurvivor, trade, helpInjured, takeGroundItem, takeAllGround, dropItem, type Dir } from "@/app/actions";
-import type { GameSnapshot } from "@/lib/types";
+import { move, resolveEncounter, exitBuilding, enterBuilding, returnHome, useConsumable, interact, recruitSurvivor, trade, helpInjured, takeGroundItem, takeAllGround, dropItem, type Dir } from "@/app/actions";
+import type { GameSnapshot, ExpeditionView } from "@/lib/types";
+
+const TIER_COLOR = ["#7bbf5a", "#9aa3ab", "#c9b24a", "#d98a36", "#c25a3a", "#b13838"];
 
 export default function WastelandView() {
   const snap = useGame((s) => s.snapshot)!;
@@ -17,6 +19,7 @@ export default function WastelandView() {
   const scrap = exp.backpack.filter((b) => b.defKey === "scrap").reduce((n, b) => n + b.quantity, 0);
   const isTrader = exp.pending?.kind === "trader";
   const blocked = !!exp.pending || isPending;
+  const inside = exp.mode === "INTERIOR";
 
   return (
     <div className="grime relative flex h-full w-full flex-col gap-2 overflow-y-auto scroll-thin p-2">
@@ -24,15 +27,10 @@ export default function WastelandView() {
       <div className="panel rounded p-2">
         <div className="flex items-center justify-between text-[0.66rem]">
           <span className="title text-[var(--amber)]" title={exp.conditionNote}>{exp.conditionIcon} {exp.conditionName}</span>
-          <span className="text-[var(--ink-dim)]">{exp.zoneName} · T{exp.tier}</span>
+          <span className="text-[var(--ink-dim)]">{exp.locationIcon} {exp.locationName}{inside ? ` · T${exp.tier}` : ""}</span>
         </div>
-        <div className="mt-0.5 text-[0.58rem]">
-          <span className="text-[var(--ink-dim)]">Territory: </span>
-          {exp.territoryName ? (
-            <span>{exp.territoryName} <span className="text-[var(--ink-dim)]">· {exp.territoryStanding}</span></span>
-          ) : (
-            <span className="text-[var(--ink-dim)]">unclaimed wastes</span>
-          )}
+        <div className="mt-0.5 text-[0.58rem] text-[var(--ink-dim)]">
+          {inside ? "Loot the rooms — your way out is the 🚪 you came in by." : "Roam the streets · step into a building's door to loot it · 🏠 to bank."}
         </div>
         <div className="mt-2 grid grid-cols-3 gap-2">
           <Meter label="Health" value={player.health} max={player.maxHealth} color="#b13838" critical={player.health <= player.maxHealth * 0.3} />
@@ -41,9 +39,7 @@ export default function WastelandView() {
         </div>
       </div>
 
-      {/* Map with environmental backdrop. The grid is a square sized to the
-          panel's height (centred), so the player stays dead-centre and no row
-          gets clipped. */}
+      {/* Top-down view, player centred. A city minimap overlays the corner. */}
       <div className="wasteland-bg panel relative flex shrink-0 items-center justify-center overflow-hidden rounded p-2" style={{ ["--biome" as string]: exp.biomeColor, height: "min(82vw, 360px)" }}>
         <div className="grid aspect-square h-full max-w-full gap-[2px]" style={{ gridTemplateColumns: `repeat(${cols}, 1fr)` }}>
           {exp.tiles.map((t) => {
@@ -52,18 +48,30 @@ export default function WastelandView() {
             let content = "";
             let opacity = 1;
             let color: string | undefined;
-            if (t.isPlayer) {
+            if (t.edge) {
+              bg = "rgba(10,8,7,0.85)";
+              border = "1px solid rgba(0,0,0,0.5)";
+            } else if (t.isPlayer) {
               bg = "rgba(58,47,35,0.9)";
               border = "1px solid var(--amber)";
               content = "🧍";
+            } else if (t.kind === "BUILDING") {
+              bg = "rgba(20,17,14,0.95)";
+              border = "1px solid rgba(0,0,0,0.45)";
+            } else if (t.kind === "DOOR") {
+              bg = "rgba(58,47,35,0.6)";
+              border = "1px solid var(--amber)";
+              content = t.icon ?? "🚪";
+            } else if (t.kind === "SHELTER") {
+              bg = "rgba(47,58,42,0.8)";
+              border = "1px solid var(--good)";
+              content = "🏠";
             } else if (t.visited) {
-              // your trail — explored ground
               bg = "rgba(58,47,35,0.45)";
               border = "1px solid rgba(224,163,46,0.25)";
               content = t.feature === "EMPTY" ? "·" : t.icon ?? "";
               if (t.feature === "EMPTY") color = "rgba(224,163,46,0.4)";
             } else if (t.spotted) {
-              // seen from afar via look
               bg = mix(t.color ?? "#2a241d", 0.3);
               border = "1px dashed rgba(224,163,46,0.4)";
               content = t.feature === "EMPTY" ? "" : t.icon ?? "";
@@ -71,7 +79,7 @@ export default function WastelandView() {
             } else if (t.revealed) {
               bg = mix(t.color ?? "#2a241d", 0.5);
               content = t.feature === "EMPTY" ? "" : t.icon ?? "";
-              if (t.isExit) border = "1px solid var(--tox)";
+              if (t.isExit) { border = "1px solid var(--tox)"; content = "🚪"; }
             } else if (t.scouted) {
               bg = mix(t.color ?? "#2a241d", 0.16);
               border = "1px dashed rgba(255,255,255,0.12)";
@@ -81,7 +89,7 @@ export default function WastelandView() {
             return (
               <div
                 key={`${t.x},${t.y}`}
-                title={t.revealed ? t.label : t.scouted ? "scouted — unknown" : "unexplored"}
+                title={t.edge ? "" : t.revealed ? t.label : t.scouted ? "unexplored" : "unexplored"}
                 className={`flex aspect-square items-center justify-center rounded-[2px] text-[0.8rem] ${t.isPlayer ? "ring-2 ring-[var(--amber)]" : ""}`}
                 style={{ background: bg, border, color, opacity }}
               >
@@ -90,9 +98,10 @@ export default function WastelandView() {
             );
           })}
         </div>
+        <Minimap exp={exp} />
       </div>
 
-      {/* Encounter card */}
+      {/* Encounter cards */}
       {exp.pending && exp.pending.kind === "enemy" && (
         <div className="panel rounded p-2" style={{ borderColor: "var(--blood)" }}>
           <div className="flex items-center justify-between">
@@ -227,13 +236,54 @@ export default function WastelandView() {
             <Btn disabled={blocked || exp.searchedHere} onClick={() => run(() => interact(player.id, "search"))}>{exp.searchedHere ? "Searched" : "Search"}</Btn>
             <Btn disabled={blocked} onClick={() => run(() => interact(player.id, "rest"))}>Rest</Btn>
           </div>
-          <Btn variant="go" disabled={isPending || !!exp.pending} onClick={() => run(() => leaveZone(player.id))} className="py-1.5">
-            ↩ Leave Zone
-          </Btn>
+          {inside ? (
+            <Btn variant="go" disabled={isPending || !!exp.pending} onClick={() => run(() => exitBuilding(player.id))} className="py-1.5">
+              🚪 Exit to street
+            </Btn>
+          ) : exp.onDoor ? (
+            <Btn variant="go" disabled={blocked} onClick={() => run(() => enterBuilding(player.id, exp.onDoor!.id))} className="py-1.5">
+              ⮧ Enter {exp.onDoor.name}
+            </Btn>
+          ) : (
+            <Btn variant="go" disabled={isPending || !!exp.pending || !exp.nearShelter} onClick={() => run(() => returnHome(player.id))} className="py-1.5">
+              {exp.nearShelter ? "⌂ Return Home (bank loot)" : "⌂ Reach 🏠 on the map to bank"}
+            </Btn>
+          )}
         </div>
       </div>
 
       <Terminal snap={snap} run={run} disabled={isPending} />
+    </div>
+  );
+}
+
+/** City-wide minimap overlaid in the map's corner: shelter, buildings, you. */
+function Minimap({ exp }: { exp: ExpeditionView }) {
+  const N = exp.cityDim;
+  const pct = (v: number) => ((v + 0.5) / N) * 100;
+  const here = exp.minimap.find((m) => m.here);
+  const px = exp.mode === "CITY" ? exp.posX : here?.x ?? exp.shelter.x;
+  const py = exp.mode === "CITY" ? exp.posY : here?.y ?? exp.shelter.y;
+  return (
+    <div className="absolute right-1 top-1 z-10 overflow-hidden rounded border border-[rgba(224,163,46,0.35)]" style={{ width: 96, height: 96, background: "rgba(8,6,5,0.78)" }}>
+      {/* shelter */}
+      <span className="absolute -translate-x-1/2 -translate-y-1/2 text-[8px]" style={{ left: `${pct(exp.shelter.x)}%`, top: `${pct(exp.shelter.y)}%` }}>🏠</span>
+      {/* buildings */}
+      {exp.minimap.map((m) => (
+        <span
+          key={`${m.x},${m.y}`}
+          className="absolute -translate-x-1/2 -translate-y-1/2 rounded-[1px]"
+          title={`${m.name} · T${m.tier}`}
+          style={{
+            left: `${pct(m.x)}%`, top: `${pct(m.y)}%`,
+            width: m.here ? 6 : 4, height: m.here ? 6 : 4,
+            background: TIER_COLOR[m.tier] ?? "#9aa3ab",
+            outline: m.here ? "1px solid var(--amber)" : "none",
+          }}
+        />
+      ))}
+      {/* you */}
+      <span className="pulse absolute -translate-x-1/2 -translate-y-1/2 rounded-full" style={{ left: `${pct(px)}%`, top: `${pct(py)}%`, width: 5, height: 5, background: "var(--amber)", boxShadow: "0 0 4px var(--amber)" }} />
     </div>
   );
 }
@@ -283,6 +333,9 @@ function Terminal({ snap, run, disabled }: { snap: GameSnapshot; run: (fn: () =>
     } else if (["flee", "run", "escape"].includes(verb)) {
       if (exp.pending?.kind !== "enemy") return setNote("Nothing to flee from.");
       run(() => resolveEncounter(player.id, "flee"));
+    } else if (["enter", "in"].includes(verb)) {
+      if (!exp.onDoor) return setNote("No door here to enter.");
+      run(() => enterBuilding(player.id, exp.onDoor!.id));
     } else if (["recruit", "invite"].includes(verb)) {
       if (pk !== "survivor") return setNote("No survivor here to recruit.");
       run(() => recruitSurvivor(player.id, true));
@@ -299,12 +352,16 @@ function Terminal({ snap, run, disabled }: { snap: GameSnapshot; run: (fn: () =>
       else if (pk === "trader") run(() => trade(player.id, { type: "leave" }));
       else if (pk === "injured") run(() => helpInjured(player.id, false));
       else setNote("Nothing to ignore.");
-    } else if (["r", "return", "home", "leave"].includes(verb)) {
+    } else if (["exit", "out", "leave"].includes(verb) && exp.mode === "INTERIOR" && !pk) {
+      run(() => exitBuilding(player.id));
+    } else if (["r", "return", "home", "bank"].includes(verb)) {
       if (pk === "enemy") return setNote("Can't leave mid-fight.");
       if (pk === "survivor") return run(() => recruitSurvivor(player.id, false));
       if (pk === "trader") return run(() => trade(player.id, { type: "leave" }));
       if (pk === "injured") return run(() => helpInjured(player.id, false));
-      run(() => leaveZone(player.id));
+      if (exp.mode === "INTERIOR") return run(() => exitBuilding(player.id));
+      if (!exp.nearShelter) return setNote("Head to your shelter (🏠) to bank.");
+      run(() => returnHome(player.id));
     } else if (["look", "l", "examine", "scan"].includes(verb)) {
       run(() => interact(player.id, "look"));
     } else if (verb === "search") {
@@ -322,7 +379,7 @@ function Terminal({ snap, run, disabled }: { snap: GameSnapshot; run: (fn: () =>
       if (!item) return setNote("No matching consumable in your pack.");
       run(() => useConsumable(player.id, item.id));
     } else if (verb === "help") {
-      setNote("move: n s e w ne nw se sw · search · take · look · rest · fight · flee · recruit · buy [n] · aid · use [item] · return");
+      setNote("move: n s e w ne nw se sw · search · take · look · rest · enter · exit · fight · flee · recruit · buy [n] · aid · use [item] · return");
     } else {
       setNote(`Unknown command: ${verb}`);
     }

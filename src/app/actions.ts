@@ -15,31 +15,66 @@ import {
   type PlayerCombat,
 } from "@/lib/game";
 import { mulberry32, hashSeed, randInt, chance, weighted, pick } from "@/lib/rng";
-import { tileAt, lootForTile, enemyForTile, wanderingEnemy, generateLoot, chebyshev, tierForDistance } from "@/lib/wasteland";
+import { lootForTile, enemyForTile, wanderingEnemy, generateLoot, type Tile } from "@/lib/wasteland";
 import { BIOMES, ENEMIES } from "@/data/world";
 import { sightFor, ambientLine, enemyEntrance, hazardLine, searchNothing, survivorIntro } from "@/data/flavor";
-import { factionAt, FACTIONS, FACTION_KEYS, RIVAL, repOf, standing, type FactionKey, type RepMap } from "@/data/factions";
+import { factionAt, FACTIONS, FACTION_KEYS, RIVAL, standing, type FactionKey, type RepMap } from "@/data/factions";
 import { CONDITIONS, rollCondition, type Condition } from "@/data/conditions";
-import { ZONES, ZONES_BY_KEY, ZONE_INDEX, ZONE_TYPE_META, type ZoneDef } from "@/data/zones";
+import {
+  CITY_DIM, BUILDINGS, BUILDINGS_BY_ID, SHELTER_DOOR,
+  cityTerrain, passable, cityTierAt, cityFeature, interiorTile, interiorSeed, type Building,
+} from "@/lib/city";
 
-/** Resolve the bounded zone the expedition is currently exploring (null on the
- *  overview map). Each zone gets its own deterministic seed and fixed tier. */
-function zoneCtx(exp: { seed: number; zoneKey: string | null }): { zone: ZoneDef; seed: number; tier: number; faction: FactionKey | null; size: number } | null {
-  if (!exp.zoneKey) return null;
-  const zone = ZONES_BY_KEY[exp.zoneKey];
-  if (!zone) return null;
-  return { zone, seed: hashSeed(exp.seed, ZONE_INDEX[zone.key] + 1), tier: zone.tier, faction: zone.faction, size: zone.size };
+/** The space the expedition currently occupies: out on the city streets
+ *  (zoneKey null) or inside a building's interior room (zoneKey = building id). */
+type Space = {
+  mode: "CITY" | "INTERIOR";
+  venture: number; // expedition seed — re-rolls enemies/loot each venture
+  building: Building | null;
+  size: number; // bound: CITY_DIM, or the building's interior size
+  lootSeed: number; // seed for lootForTile lookups
+};
+
+function spaceOf(exp: { seed: number; zoneKey: string | null }): Space {
+  if (exp.zoneKey) {
+    const b = BUILDINGS_BY_ID[exp.zoneKey];
+    if (b) return { mode: "INTERIOR", venture: exp.seed, building: b, size: b.size, lootSeed: interiorSeed(b, exp.seed) };
+  }
+  return { mode: "CITY", venture: exp.seed, building: null, size: CITY_DIM, lootSeed: hashSeed(exp.seed, 4242) };
 }
 function inBounds(size: number, x: number, y: number): boolean {
   return x >= 0 && y >= 0 && x < size && y < size;
 }
-function zoneSurroundings(seed: number, tier: number, size: number, x: number, y: number): string {
+/** The (dynamic) tile contents at a position in the current space. */
+function spaceTile(sp: Space, x: number, y: number): Tile {
+  return sp.mode === "CITY" ? cityFeature(sp.venture, x, y) : interiorTile(sp.building!, sp.venture, x, y);
+}
+function spaceTier(sp: Space, x: number, y: number): number {
+  return sp.mode === "CITY" ? cityTierAt(x, y) : sp.building!.tier;
+}
+/** Tile-state key, namespaced per space so street and interior state coexist. */
+function tkey(zoneKey: string | null, x: number, y: number): string {
+  return zoneKey ? `${zoneKey}:${x},${y}` : `${x},${y}`;
+}
+/** Whether a neighbour tile can be stood on (interiors are open within bounds). */
+function spacePassable(sp: Space, x: number, y: number): boolean {
+  if (!inBounds(sp.size, x, y)) return false;
+  return sp.mode === "CITY" ? passable(x, y) : true;
+}
+/** Brief readout of notable things in the four adjacent tiles. */
+function nearbyNotables(sp: Space, x: number, y: number): string {
   const dirs = [["north", 0, -1], ["east", 1, 0], ["south", 0, 1], ["west", -1, 0]] as const;
   const parts: string[] = [];
   for (const [name, dx, dy] of dirs) {
     const nx = x + dx, ny = y + dy;
-    if (!inBounds(size, nx, ny)) continue;
-    const t = tileAt(seed, nx, ny, tier);
+    if (!inBounds(sp.size, nx, ny)) continue;
+    if (sp.mode === "CITY") {
+      const ter = cityTerrain(nx, ny);
+      if (ter.kind === "DOOR" && ter.building) { parts.push(`${ter.building.name} entrance to the ${name}`); continue; }
+      if (ter.kind === "SHELTER") { parts.push(`your shelter to the ${name}`); continue; }
+      if (!passable(nx, ny)) continue;
+    }
+    const t = spaceTile(sp, nx, ny);
     if (NOTABLE_FEATURES.has(t.feature)) parts.push(`${t.label} to the ${name}`);
   }
   return parts.join("; ");
@@ -96,21 +131,10 @@ async function consumeBackpack(playerId: string, defKey: string, qty: number): P
   return true;
 }
 
-/** Brief readout of notable things in the 4 adjacent tiles. */
-function surroundings(seed: number, x: number, y: number): string {
-  const dirs = [["north", 0, -1], ["east", 1, 0], ["south", 0, 1], ["west", -1, 0]] as const;
-  const parts: string[] = [];
-  for (const [name, dx, dy] of dirs) {
-    const t = tileAt(seed, x + dx, y + dy);
-    if (NOTABLE_FEATURES.has(t.feature)) parts.push(`${t.label} to the ${name}`);
-  }
-  return parts.join("; ");
-}
 import type {
   GameSnapshot,
   ItemView,
   ExpeditionView,
-  OverviewView,
   TileView,
   EncounterView,
   CraftableView,
@@ -235,113 +259,117 @@ async function loadSnapshot(playerId: string, flash: string | null = null): Prom
     };
   });
 
-  const rep = (player.factionRep as RepMap) ?? {};
   const carryBonus = equipped.BACKPACK ? ITEM_DEFS[equipped.BACKPACK.defKey]?.carryBonus ?? 0 : 0;
   let expedition: ExpeditionView | null = null;
-  let overview: OverviewView | null = null;
 
   if (player.state === "IN_EXPEDITION") {
     const exp = await prisma.expedition.findFirst({ where: { playerId, status: "ACTIVE" } });
     if (exp) {
       const condDef = CONDITIONS[(exp.condition as Condition) ?? "CLEAR"] ?? CONDITIONS.CLEAR;
-      const ctx = zoneCtx(exp);
+      const sp = spaceOf(exp);
+      const visited = new Set((exp.visited as unknown as string[]) ?? []);
+      const spotted = new Set((exp.spotted as unknown as string[]) ?? []);
+      const cleared = new Set((exp.cleared as unknown as string[]) ?? []);
+      const searched = new Set((exp.searched as unknown as string[]) ?? []);
+      const SIGHT = 2;
+      const exitX = Math.floor(sp.size / 2), exitY = sp.size - 1;
 
-      if (!ctx) {
-        // On the overview city map — choosing where to raid.
-        overview = {
-          conditionName: condDef.name,
-          conditionIcon: condDef.icon,
-          conditionNote: condDef.note,
-          backpackCount: backpack.reduce((n, b) => n + b.quantity, 0),
-          carryCap: BASE_CARRY + carryBonus,
-          zones: ZONES.map((z) => ({
-            key: z.key,
-            name: z.name,
-            type: z.type,
-            x: z.x,
-            y: z.y,
-            tier: z.tier,
-            icon: ZONE_TYPE_META[z.type].icon,
-            color: ZONE_TYPE_META[z.type].color,
-            faction: z.faction ? FACTIONS[z.faction].name : null,
-            standing: z.faction ? standing(repOf(rep, z.faction)) : null,
-          })),
-        };
-      } else {
-        // Exploring a bounded zone grid.
-        const { zone, seed: zSeed, tier, faction, size } = ctx;
-        const visited = new Set((exp.visited as unknown as string[]) ?? []);
-        const spotted = new Set((exp.spotted as unknown as string[]) ?? []);
-        const scouted = new Set<string>();
-        for (const [dx, dy] of [[0, -1], [0, 1], [-1, 0], [1, 0]]) {
-          const nx = exp.posX + dx, ny = exp.posY + dy;
-          if (inBounds(size, nx, ny)) scouted.add(`${nx},${ny}`);
-        }
+      const tiles: TileView[] = [];
+      for (let dy = -WINDOW_RADIUS; dy <= WINDOW_RADIUS; dy++) {
+        for (let dx = -WINDOW_RADIUS; dx <= WINDOW_RADIUS; dx++) {
+          const x = exp.posX + dx, y = exp.posY + dy;
+          const isPlayer = dx === 0 && dy === 0;
+          const key = tkey(exp.zoneKey, x, y);
 
-        const tiles: TileView[] = [];
-        for (let dy = -WINDOW_RADIUS; dy <= WINDOW_RADIUS; dy++) {
-          for (let dx = -WINDOW_RADIUS; dx <= WINDOW_RADIUS; dx++) {
-            const x = exp.posX + dx;
-            const y = exp.posY + dy;
-            if (!inBounds(size, x, y)) {
-              tiles.push({ x, y, revealed: false, edge: true });
-              continue;
+          if (sp.mode === "CITY") {
+            const ter = cityTerrain(x, y);
+            if (ter.kind === "EDGE") { tiles.push({ x, y, revealed: false, edge: true }); continue; }
+            if (ter.kind === "BUILDING") { tiles.push({ x, y, revealed: true, kind: "BUILDING", label: "Building", color: "#2c2722", isPlayer }); continue; }
+            if (ter.kind === "DOOR" && ter.building) { tiles.push({ x, y, revealed: true, kind: "DOOR", icon: ter.building.icon, label: ter.building.name, buildingName: ter.building.name, feature: "DOOR", color: "#3a342c", isPlayer }); continue; }
+            if (ter.kind === "SHELTER") { tiles.push({ x, y, revealed: true, kind: "SHELTER", icon: "🏠", label: "Your Shelter", feature: "SHELTER", color: "#2f3a2a", isPlayer }); continue; }
+            // walkable street / lot
+            const open = ter.kind === "LOT";
+            const inSight = Math.max(Math.abs(dx), Math.abs(dy)) <= SIGHT || isPlayer || visited.has(key);
+            let icon = open ? "▢" : "·", label = open ? "Empty Lot" : "Street", feature = "EMPTY";
+            if (inSight) {
+              const f = cityFeature(sp.venture, x, y);
+              if (f.feature === "ENEMY" && !cleared.has(key)) { icon = f.icon; label = f.label; feature = "ENEMY"; }
+              else if (f.feature === "LOOT" && !searched.has(key)) { icon = f.icon; label = f.label; feature = "LOOT"; }
             }
-            const keyT = `${x},${y}`;
-            const isPlayer = dx === 0 && dy === 0;
-            const t = tileAt(zSeed, x, y, tier);
-            if (visited.has(keyT) || isPlayer) {
-              tiles.push({ x, y, revealed: true, visited: visited.has(keyT) && !isPlayer, icon: t.icon, label: t.label, feature: t.feature, color: BIOMES[t.biome].color, isPlayer });
-            } else if (spotted.has(keyT)) {
-              tiles.push({ x, y, revealed: true, spotted: true, icon: t.icon, label: t.label, feature: t.feature, color: BIOMES[t.biome].color });
-            } else if (scouted.has(keyT)) {
-              tiles.push({ x, y, revealed: false, scouted: true, color: BIOMES[t.biome].color });
-            } else {
-              tiles.push({ x, y, revealed: false });
-            }
+            tiles.push({ x, y, revealed: true, visited: visited.has(key) && !isPlayer, kind: ter.kind, icon, label, feature, color: open ? "#46402f" : "#3b362f", isPlayer });
+            continue;
+          }
+
+          // interior
+          if (!inBounds(sp.size, x, y)) { tiles.push({ x, y, revealed: false, edge: true }); continue; }
+          const isExit = x === exitX && y === exitY;
+          const t = spaceTile(sp, x, y);
+          const icon = isExit ? "🚪" : t.icon;
+          const label = isExit ? "Exit to street" : t.label;
+          const scouted = Math.abs(dx) + Math.abs(dy) === 1;
+          if (visited.has(key) || isPlayer) {
+            tiles.push({ x, y, revealed: true, visited: visited.has(key) && !isPlayer, icon, label, feature: isExit ? "EXIT" : t.feature, color: BIOMES[t.biome].color, isPlayer, isExit });
+          } else if (spotted.has(key)) {
+            tiles.push({ x, y, revealed: true, spotted: true, icon, label, feature: isExit ? "EXIT" : t.feature, color: BIOMES[t.biome].color, isExit });
+          } else if (scouted) {
+            tiles.push({ x, y, revealed: false, scouted: true, color: BIOMES[t.biome].color, isExit });
+          } else {
+            tiles.push({ x, y, revealed: false });
           }
         }
-
-        const cur = tileAt(zSeed, exp.posX, exp.posY, tier);
-        const hereKey = `${exp.posX},${exp.posY}`;
-        const groundHere = ((exp.ground as unknown as Record<string, { defKey: string; quantity: number; durability: number | null }[]>) ?? {})[hereKey] ?? [];
-        const groundView = groundHere.map((g, idx) => ({
-          idx, defKey: g.defKey, name: ITEM_DEFS[g.defKey]?.name ?? g.defKey, icon: ITEM_DEFS[g.defKey]?.icon ?? "❔",
-          quantity: g.quantity, durability: g.durability,
-        }));
-        const searchedHere = new Set((exp.searched as unknown as string[]) ?? []).has(hereKey);
-        expedition = {
-          id: exp.id,
-          seed: zSeed,
-          posX: exp.posX,
-          posY: exp.posY,
-          distance: 0,
-          tier,
-          tiles,
-          windowRadius: WINDOW_RADIUS,
-          zoneName: zone.name,
-          zoneType: zone.type,
-          gridSize: size,
-          biomeColor: BIOMES[cur.biome].color,
-          biomeName: BIOMES[cur.biome].name,
-          condition: condDef.key,
-          conditionName: condDef.name,
-          conditionIcon: condDef.icon,
-          conditionNote: condDef.note,
-          territoryFaction: faction,
-          territoryName: faction ? FACTIONS[faction].name : null,
-          territoryStanding: faction ? standing(repOf(rep, faction)) : null,
-          log: ((exp.log as unknown as string[]) ?? []).slice(0, 16),
-          backpack: backpack.map(itemView),
-          backpackUsed: backpack.reduce((n, b) => n + b.quantity, 0),
-          carryCap: BASE_CARRY + carryBonus,
-          ground: groundView,
-          searchedHere,
-          pending: (exp.pending as unknown as EncounterView | null) ?? null,
-          currentLabel: cur.label,
-          atExit: false,
-        };
       }
+
+      const hereKey = tkey(exp.zoneKey, exp.posX, exp.posY);
+      const groundHere = ((exp.ground as unknown as Record<string, { defKey: string; quantity: number; durability: number | null }[]>) ?? {})[hereKey] ?? [];
+      const groundView = groundHere.map((g, idx) => ({
+        idx, defKey: g.defKey, name: ITEM_DEFS[g.defKey]?.name ?? g.defKey, icon: ITEM_DEFS[g.defKey]?.icon ?? "❔",
+        quantity: g.quantity, durability: g.durability,
+      }));
+
+      const cur = spaceTile(sp, exp.posX, exp.posY);
+      const tier = spaceTier(sp, exp.posX, exp.posY);
+      const ter = sp.mode === "CITY" ? cityTerrain(exp.posX, exp.posY) : null;
+      const onDoor = ter?.kind === "DOOR" && ter.building ? { id: ter.building.id, name: ter.building.name } : null;
+      const nearShelter = sp.mode === "CITY" && Math.max(Math.abs(exp.posX - SHELTER_DOOR[0]), Math.abs(exp.posY - SHELTER_DOOR[1])) <= 1;
+      const onExit = sp.mode === "INTERIOR" && exp.posX === exitX && exp.posY === exitY;
+      const currentLabel =
+        sp.mode === "CITY"
+          ? (ter?.kind === "SHELTER" ? "Your Shelter" : ter?.kind === "DOOR" ? `${ter.building?.name} (entrance)` : cur.feature === "ENEMY" && !cleared.has(hereKey) ? cur.label : cur.feature === "LOOT" && !searched.has(hereKey) ? cur.label : ter?.kind === "LOT" ? "Empty Lot" : "Street")
+          : onExit ? "Exit to street" : cur.label;
+
+      expedition = {
+        id: exp.id,
+        mode: sp.mode,
+        posX: exp.posX,
+        posY: exp.posY,
+        tier,
+        tiles,
+        windowRadius: WINDOW_RADIUS,
+        locationName: sp.mode === "CITY" ? "City Streets" : sp.building!.name,
+        locationIcon: sp.mode === "CITY" ? "🏙️" : sp.building!.icon,
+        biomeColor: BIOMES[cur.biome].color,
+        biomeName: sp.mode === "CITY" ? "Ruined City" : BIOMES[sp.building!.biome].name,
+        condition: condDef.key,
+        conditionName: condDef.name,
+        conditionIcon: condDef.icon,
+        conditionNote: condDef.note,
+        territoryFaction: null,
+        territoryName: null,
+        territoryStanding: null,
+        log: ((exp.log as unknown as string[]) ?? []).slice(0, 16),
+        backpack: backpack.map(itemView),
+        backpackUsed: backpack.reduce((n, b) => n + b.quantity, 0),
+        carryCap: BASE_CARRY + carryBonus,
+        ground: groundView,
+        searchedHere: searched.has(hereKey),
+        pending: (exp.pending as unknown as EncounterView | null) ?? null,
+        currentLabel,
+        onDoor,
+        nearShelter,
+        cityDim: CITY_DIM,
+        minimap: BUILDINGS.map((b) => ({ x: b.doorX, y: b.doorY, icon: b.icon, name: b.name, tier: b.tier, here: exp.zoneKey === b.id })),
+        shelter: { x: SHELTER_DOOR[0], y: SHELTER_DOOR[1] },
+      };
     }
   }
 
@@ -388,7 +416,6 @@ async function loadSnapshot(playerId: string, flash: string | null = null): Prom
       const rep = ((player.factionRep as RepMap) ?? {})[k] ?? 0;
       return { key: k, name: FACTIONS[k].name, icon: FACTIONS[k].icon, color: FACTIONS[k].color, note: FACTIONS[k].note, rep, standing: standing(rep) };
     }),
-    overview,
     expedition,
     flash,
   };
@@ -557,46 +584,49 @@ export async function startExpedition(playerId: string): Promise<GameSnapshot | 
   if (!player || player.state !== "AT_SHELTER") return loadSnapshot(playerId);
   const seed = newSeed();
   const condition = rollCondition(mulberry32(hashSeed(seed, 31)));
-  const intro = condition === "CLEAR" ? "You head out into the city. Choose a zone to raid." : `You head out — ${CONDITIONS[condition].name}. ${CONDITIONS[condition].note}`;
+  // Start on the street just outside the shelter door, facing the city.
+  const sx = SHELTER_DOOR[0], sy = SHELTER_DOOR[1] - 1;
+  const intro = condition === "CLEAR" ? "You step out of the shelter into the ruined city." : `You step out into the city — ${CONDITIONS[condition].name}. ${CONDITIONS[condition].note}`;
   await prisma.expedition.create({
-    data: { playerId, seed, condition, zoneKey: null, visited: [], log: [intro], posX: 0, posY: 0, distance: 0 },
+    data: { playerId, seed, condition, zoneKey: null, visited: [`${sx},${sy}`], spotted: [], cleared: [], searched: [], ground: {}, log: [intro], posX: sx, posY: sy, distance: 0 },
   });
   await prisma.player.update({ where: { id: playerId }, data: { state: "IN_EXPEDITION", stamina: 100 } });
   revalidatePath("/");
   return loadSnapshot(playerId);
 }
 
-/** Travel from the overview map into a zone and begin exploring its grid. */
-export async function enterZone(playerId: string, zoneKey: string): Promise<GameSnapshot | null> {
+/** Step in through a building's door into its interior room. */
+export async function enterBuilding(playerId: string, buildingId: string): Promise<GameSnapshot | null> {
   const player = await prisma.player.findUnique({ where: { id: playerId } });
   if (!player || player.state !== "IN_EXPEDITION") return loadSnapshot(playerId);
   const exp = await prisma.expedition.findFirst({ where: { playerId, status: "ACTIVE" } });
-  if (!exp || exp.zoneKey) return loadSnapshot(playerId);
-  const zone = ZONES_BY_KEY[zoneKey];
-  if (!zone || zone.type === "SAFE" || zone.size <= 0) return loadSnapshot(playerId);
+  if (!exp || exp.zoneKey || exp.pending) return loadSnapshot(playerId, exp?.pending ? "Deal with the threat first." : "");
+  const b = BUILDINGS_BY_ID[buildingId];
+  if (!b) return loadSnapshot(playerId);
 
-  // Enter at the south edge, centred. Each zone is a fresh local map.
-  const ex = Math.floor(zone.size / 2);
-  const ey = zone.size - 1;
+  // Enter at the interior's south-centre — that tile is the way back out.
+  const ex = Math.floor(b.size / 2), ey = b.size - 1;
+  const visited = new Set((exp.visited as unknown as string[]) ?? []);
+  visited.add(tkey(buildingId, ex, ey));
   const log = ((exp.log as unknown as string[]) ?? []).slice(0, 18);
-  log.unshift(`You slip into ${zone.name} — Tier ${zone.tier}${zone.faction ? `, ${FACTIONS[zone.faction].name} turf` : ""}.`);
-  await prisma.expedition.update({
-    where: { id: exp.id },
-    data: { zoneKey, posX: ex, posY: ey, visited: [`${ex},${ey}`], spotted: [], cleared: [], searched: [], ground: {}, pending: Prisma.DbNull, log },
-  });
+  log.unshift(`${b.icon} You push inside the ${b.name} — Tier ${b.tier}. The air is still.`);
+  await prisma.expedition.update({ where: { id: exp.id }, data: { zoneKey: buildingId, posX: ex, posY: ey, visited: [...visited], log } });
   revalidatePath("/");
   return loadSnapshot(playerId);
 }
 
-/** Pull back out of a zone to the overview city map. */
-export async function leaveZone(playerId: string): Promise<GameSnapshot | null> {
+/** Step back out of a building onto the street, at its door. */
+export async function exitBuilding(playerId: string): Promise<GameSnapshot | null> {
   const player = await prisma.player.findUnique({ where: { id: playerId } });
   if (!player || player.state !== "IN_EXPEDITION") return loadSnapshot(playerId);
   const exp = await prisma.expedition.findFirst({ where: { playerId, status: "ACTIVE" } });
   if (!exp || !exp.zoneKey || exp.pending) return loadSnapshot(playerId, exp?.pending ? "Deal with the threat first." : "");
+  const b = BUILDINGS_BY_ID[exp.zoneKey];
+  const visited = new Set((exp.visited as unknown as string[]) ?? []);
+  if (b) visited.add(tkey(null, b.doorX, b.doorY));
   const log = ((exp.log as unknown as string[]) ?? []).slice(0, 18);
-  log.unshift("You fall back to the city map.");
-  await prisma.expedition.update({ where: { id: exp.id }, data: { zoneKey: null, log } });
+  log.unshift("You step back out onto the street.");
+  await prisma.expedition.update({ where: { id: exp.id }, data: { zoneKey: null, posX: b?.doorX ?? exp.posX, posY: b?.doorY ?? exp.posY, visited: [...visited], log } });
   revalidatePath("/");
   return loadSnapshot(playerId);
 }
@@ -617,99 +647,122 @@ export async function move(playerId: string, dir: Dir): Promise<GameSnapshot | n
   const exp = await prisma.expedition.findFirst({ where: { playerId, status: "ACTIVE" } });
   if (!exp) return loadSnapshot(playerId);
   if (exp.pending) return loadSnapshot(playerId, "Deal with the threat first.");
-  if (player.stamina <= 0) return loadSnapshot(playerId, "Too exhausted — rest, or leave the zone.");
-  const ctx = zoneCtx(exp);
-  if (!ctx) return loadSnapshot(playerId, "Pick a zone to explore.");
-  const { tier, faction, size, seed: zSeed } = ctx;
+  if (player.stamina <= 0) return loadSnapshot(playerId, "Too exhausted — rest a moment, or head home.");
+  const sp = spaceOf(exp);
 
   const [dx, dy] = DIRS[dir];
-  const x = exp.posX + dx;
-  const y = exp.posY + dy;
-  if (!inBounds(size, x, y)) return loadSnapshot(playerId, "The edge of the district — only rubble beyond.");
-  const key = `${x},${y}`;
+  const x = exp.posX + dx, y = exp.posY + dy;
+
+  // Terrain gating differs by space.
+  if (sp.mode === "CITY") {
+    const ter = cityTerrain(x, y);
+    if (ter.kind === "EDGE") return loadSnapshot(playerId, "The city ends here — only rubble beyond.");
+    if (ter.kind === "BUILDING") return loadSnapshot(playerId, "A wall blocks the way. Find a door.");
+    if (ter.kind === "DOOR" && ter.building) return enterBuilding(playerId, ter.building.id);
+  } else if (!inBounds(sp.size, x, y)) {
+    return loadSnapshot(playerId, "Just a wall — no way through there.");
+  }
+
+  const key = tkey(exp.zoneKey, x, y);
   const visited = new Set((exp.visited as unknown as string[]) ?? []);
   const cleared = new Set((exp.cleared as unknown as string[]) ?? []);
   const firstVisit = !visited.has(key);
   visited.add(key);
   let log = ((exp.log as unknown as string[]) ?? []).slice(0, 18);
-  const narr = mulberry32(hashSeed(zSeed, x, y, 555));
+  const venture = exp.seed;
+  const tier = spaceTier(sp, x, y);
+  const narr = mulberry32(hashSeed(sp.lootSeed, x, y, 555));
 
   let health = player.health;
   let radiation = player.radiation;
   const stamina = clamp(player.stamina - SURV.moveStaminaCost + SURV.staminaRegenOnTile, 0, 100);
   let pending: EncounterView | null = null;
   const entry: string[] = []; // chronological lines for this step
-
-  const tile = tileAt(zSeed, x, y, tier);
   const cond = (exp.condition as Condition) ?? "CLEAR";
-  const rep = (player.factionRep as RepMap) ?? {};
-  const factionTag = faction ? ` (${FACTIONS[faction].name})` : "";
 
-  entry.push(`You move ${DIR_NAME[dir]}. ${sightFor(narr, tile.biome)}`);
-  if (chance(narr, 0.22)) entry.push(ambientLine(narr));
-  if (firstVisit && tile.feature === "ENEMY") {
-    const e = enemyForTile(tile)!;
-    if (faction && repOf(rep, faction) >= 40 && chance(narr, 0.6)) {
-      entry.push(`${FACTIONS[faction].icon} ${FACTIONS[faction].name} fighters recognise you and wave you through.`);
+  if (sp.mode === "CITY") {
+    const ter = cityTerrain(x, y);
+    if (ter.kind === "SHELTER") {
+      entry.push("🏠 You reach your shelter door. Tap Return Home to bank your haul.");
     } else {
+      const f = cityFeature(venture, x, y);
+      entry.push(`You move ${DIR_NAME[dir]} ${ter.kind === "LOT" ? "across the open ground" : "down the street"}.`);
+      if (chance(narr, 0.2)) entry.push(ambientLine(narr));
+      if (firstVisit && f.feature === "ENEMY" && !cleared.has(key)) {
+        const e = enemyForTile(f) ?? wanderingEnemy(narr, tier);
+        const elite = tier >= 4 && chance(narr, 0.2);
+        const power = Math.round(e.power * (elite ? 1.6 : 1));
+        const name = elite ? `Elite ${e.name}` : e.name;
+        pending = { kind: "enemy", enemyKey: e.key, name, icon: elite ? "☠️" : e.icon, power, hp: power, maxHp: power, faction: null, elite };
+        entry.push(`${pending.icon} ${enemyEntrance(narr, name)}`);
+      } else if (f.feature === "LOOT") {
+        const searched = new Set((exp.searched as unknown as string[]) ?? []);
+        entry.push(searched.has(key) ? `${f.icon} ${f.label} — already picked over.` : `${f.icon} ${f.label}. Worth a search.`);
+      }
+    }
+  } else {
+    // building interior — the varied encounters live in here
+    const b = sp.building!;
+    const tile = interiorTile(b, venture, x, y);
+    const isExit = x === Math.floor(sp.size / 2) && y === sp.size - 1;
+    entry.push(`You move ${DIR_NAME[dir]}. ${sightFor(narr, tile.biome)}`);
+    if (chance(narr, 0.22)) entry.push(ambientLine(narr));
+    if (isExit) entry.push("🚪 The way back out to the street is here.");
+    if (firstVisit && tile.feature === "ENEMY") {
+      const e = enemyForTile(tile)!;
       const elite = tier >= 4 && chance(narr, 0.25);
       const power = Math.round(e.power * (elite ? 1.6 : 1));
       const name = elite ? `Elite ${e.name}` : e.name;
-      pending = { kind: "enemy", enemyKey: e.key, name, icon: elite ? "☠️" : e.icon, power, hp: power, maxHp: power, faction: faction ?? null, elite };
-      entry.push(`${pending.icon} ${enemyEntrance(narr, name)}${factionTag}`);
-    }
-  } else if (tile.feature === "SURVIVOR" && !cleared.has(key)) {
-    const name = tile.survivorName ?? "a stranger";
-    const npcRng = mulberry32(hashSeed(zSeed, x, y, 909));
-    const traderW = cond === "CARAVAN" ? 6 : 3;
-    const sub = weighted(npcRng, [["recruit", 5], ["trader", traderW], ["injured", 2]]);
-    if (sub === "injured") {
-      const needDef = pick(npcRng, ["bandage", "medkit"]);
-      const need = ITEM_DEFS[needDef].name;
-      if (firstVisit) {
-        pending = { kind: "injured", name, icon: "🩸", needDef, needName: need };
-        entry.push(`🩸 ${name} lies wounded, begging for a ${need}.`);
-      } else if (Math.random() < 0.35) {
-        cleared.add(key);
-        entry.push(`🩸 You return to find ${name} has bled out. You were too slow.`);
+      pending = { kind: "enemy", enemyKey: e.key, name, icon: elite ? "☠️" : e.icon, power, hp: power, maxHp: power, faction: null, elite };
+      entry.push(`${pending.icon} ${enemyEntrance(narr, name)}`);
+    } else if (tile.feature === "SURVIVOR" && !cleared.has(key)) {
+      const name = tile.survivorName ?? "a stranger";
+      const npcRng = mulberry32(hashSeed(sp.lootSeed, x, y, 909));
+      const traderW = cond === "CARAVAN" ? 6 : 3;
+      const sub = weighted(npcRng, [["recruit", 5], ["trader", traderW], ["injured", 2]]);
+      if (sub === "injured") {
+        const needDef = pick(npcRng, ["bandage", "medkit"]);
+        const need = ITEM_DEFS[needDef].name;
+        if (firstVisit) {
+          pending = { kind: "injured", name, icon: "🩸", needDef, needName: need };
+          entry.push(`🩸 ${name} lies wounded, begging for a ${need}.`);
+        } else if (Math.random() < 0.35) {
+          cleared.add(key);
+          entry.push(`🩸 You return to find ${name} has bled out. You were too slow.`);
+        } else {
+          pending = { kind: "injured", name, icon: "🩸", needDef, needName: need };
+          entry.push(`🩸 ${name} still clings to life, waiting for that ${need}.`);
+        }
+      } else if (sub === "trader") {
+        pending = { kind: "trader", name, icon: "🧑‍🔧", offers: traderOffers(npcRng, tier, 0) };
+        entry.push(`🧑‍🔧 ${name}, a trader, has set up here. "Got goods — if you've got scrap."`);
       } else {
-        pending = { kind: "injured", name, icon: "🩸", needDef, needName: need };
-        entry.push(`🩸 ${name} still clings to life, waiting for that ${need}.`);
+        pending = { kind: "survivor", name, icon: "🧑" };
+        entry.push(`🧑 ${survivorIntro(narr, name)}`);
       }
-    } else if (sub === "trader") {
-      const discount = clamp(repOf(rep, faction), 0, 100) / 200;
-      pending = { kind: "trader", name, icon: "🧑‍🔧", offers: traderOffers(npcRng, tier, discount) };
-      entry.push(`🧑‍🔧 ${name}, a trader, waves you over. "Got goods — if you've got scrap."`);
-    } else {
-      pending = { kind: "survivor", name, icon: "🧑" };
-      entry.push(`🧑 ${survivorIntro(narr, name)}`);
+    } else if (tile.feature === "LOOT" || tile.feature === "CACHE") {
+      const searched = new Set((exp.searched as unknown as string[]) ?? []);
+      entry.push(searched.has(key) ? `${tile.icon} ${tile.label}. You've already picked through it.` : `${tile.icon} You reach ${tile.label}. Looks worth searching.`);
+    } else if (firstVisit && tile.feature === "HAZARD") {
+      const stormMult = cond === "RAD_STORM" ? 1.6 : 1;
+      const dose = Math.round(randInt(narr, SURV.radPerHazard[0], SURV.radPerHazard[1]) * (tile.hazard === "RADIATION" ? 1 : 0.6) * stormMult);
+      radiation = clamp(radiation + dose);
+      entry.push(`${tile.icon} ${hazardLine(narr, tile.hazard!)} (+${dose} rad)`);
+    } else if (!firstVisit) {
+      entry.push("Your own tracks cross this ground. Nothing new stirs.");
     }
-  } else if (tile.feature === "LOOT" || tile.feature === "CACHE") {
-    const searched = new Set((exp.searched as unknown as string[]) ?? []);
-    entry.push(searched.has(key) ? `${tile.icon} ${tile.label}. You've already picked through it.` : `${tile.icon} You reach ${tile.label}. Looks worth searching.`);
-  } else if (firstVisit && tile.feature === "HAZARD") {
-    const stormMult = cond === "RAD_STORM" ? 1.6 : 1;
-    const dose = Math.round(randInt(narr, SURV.radPerHazard[0], SURV.radPerHazard[1]) * (tile.hazard === "RADIATION" ? 1 : 0.6) * stormMult);
-    radiation = clamp(radiation + dose);
-    entry.push(`${tile.icon} ${hazardLine(narr, tile.hazard!)} (+${dose} rad)`);
-  } else if (!firstVisit) {
-    entry.push("Your own tracks cross this ground. Nothing new stirs.");
   }
 
-  if (!pending && firstVisit) {
-    const hostileTerritory = faction != null && repOf(rep, faction) <= -40;
-    const ambushChance = (cond === "RAIDER_ACTIVITY" ? 0.18 : 0) + (hostileTerritory ? 0.15 : 0);
-    if (ambushChance > 0 && chance(narr, ambushChance)) {
-      const e = wanderingEnemy(narr, tier);
-      pending = { kind: "enemy", enemyKey: e.key, name: e.name, icon: e.icon, power: e.power, hp: e.power, maxHp: e.power, faction: faction ?? null };
-      entry.push(`${e.icon} Ambush! ${enemyEntrance(narr, e.name)}${factionTag}`);
-    }
+  if (!pending && firstVisit && cond === "RAIDER_ACTIVITY" && chance(narr, 0.14)) {
+    const e = wanderingEnemy(narr, tier);
+    pending = { kind: "enemy", enemyKey: e.key, name: e.name, icon: e.icon, power: e.power, hp: e.power, maxHp: e.power, faction: null };
+    entry.push(`${e.icon} Ambush! ${enemyEntrance(narr, e.name)}`);
   }
 
   if (cond === "RAD_STORM" && firstVisit) radiation = clamp(radiation + 2);
 
   if (!pending) {
-    const near = zoneSurroundings(zSeed, tier, size, x, y);
+    const near = nearbyNotables(sp, x, y);
     if (near) entry.push(`Nearby: ${near}.`);
   }
 
@@ -745,23 +798,20 @@ export async function interact(playerId: string, kind: "look" | "search" | "rest
   const exp = await prisma.expedition.findFirst({ where: { playerId, status: "ACTIVE" } });
   if (!exp) return loadSnapshot(playerId);
   if (exp.pending) return loadSnapshot(playerId, "Deal with the threat first.");
-  const ctx = zoneCtx(exp);
-  if (!ctx) return loadSnapshot(playerId, "Pick a zone to explore.");
-  const { tier, size, seed: zSeed } = ctx;
+  const sp = spaceOf(exp);
 
-  const tile = tileAt(zSeed, exp.posX, exp.posY, tier);
+  const tile = spaceTile(sp, exp.posX, exp.posY);
+  const tier = spaceTier(sp, exp.posX, exp.posY);
   const cond = (exp.condition as Condition) ?? "CLEAR";
-  const key = `${exp.posX},${exp.posY}`;
+  const key = tkey(exp.zoneKey, exp.posX, exp.posY);
   const salt = kind === "search" ? 222 : kind === "rest" ? 333 : 111;
-  const narr = mulberry32(hashSeed(zSeed, exp.posX, exp.posY, salt, Math.floor(Math.random() * 1e9)));
+  const narr = mulberry32(hashSeed(sp.lootSeed, exp.posX, exp.posY, salt, Math.floor(Math.random() * 1e9)));
   let log = ((exp.log as unknown as string[]) ?? []).slice(0, 18);
   let stamina = player.stamina;
   let pending: EncounterView | null = null;
 
   if (kind === "look") {
-    // Inspect only the squares immediately around you (one step in any of the
-    // eight directions). Their contents are revealed and pinned to the map;
-    // the current tile's scavenge potential is assessed.
+    // Inspect the eight squares around you; pin what you see to the map.
     log.unshift(`${tile.icon} ${tile.label}. ${sightFor(narr, tile.biome)}`);
 
     const spotted = new Set((exp.spotted as unknown as string[]) ?? []);
@@ -772,9 +822,15 @@ export async function interact(playerId: string, kind: "look" | "search" | "rest
     const sightings: string[] = [];
     for (const [name, dx, dy] of dirs8) {
       const nx = exp.posX + dx, ny = exp.posY + dy;
-      if (!inBounds(size, nx, ny)) continue;
-      spotted.add(`${nx},${ny}`);
-      const nt = tileAt(zSeed, nx, ny, tier);
+      if (!inBounds(sp.size, nx, ny)) continue;
+      if (sp.mode === "CITY") {
+        const ter = cityTerrain(nx, ny);
+        if (ter.kind === "DOOR" && ter.building) { sightings.push(`${name}: ${ter.building.name} entrance`); continue; }
+        if (ter.kind === "SHELTER") { sightings.push(`${name}: your shelter`); continue; }
+        if (!passable(nx, ny)) continue;
+      }
+      spotted.add(tkey(exp.zoneKey, nx, ny));
+      const nt = spaceTile(sp, nx, ny);
       if (NOTABLE_FEATURES.has(nt.feature)) sightings.push(`${name}: ${nt.label}`);
     }
     log.unshift(sightings.length ? `You scan your surroundings — ${sightings.join("; ")}.` : "Nothing notable in the squares around you.");
@@ -805,7 +861,7 @@ export async function interact(playerId: string, kind: "look" | "search" | "rest
       log.unshift("You've already picked this spot clean.");
     } else {
       const lootTier = cond === "BOUNTIFUL" ? tier + 1 : tier;
-      let drops = lootForTile(zSeed, { ...tile, tier: lootTier });
+      let drops = lootForTile(sp.lootSeed, { ...tile, tier: lootTier });
       if (drops.length === 0) {
         drops = generateLoot(narr, [["scrap", 4], ["cloth", 3], ["ration", 3], ["water_bottle", 3], ["ammo", 2]], lootTier, [1, 2]);
       }
@@ -834,9 +890,10 @@ export async function resolveEncounter(playerId: string, choice: "fight" | "flee
   const equipped = items.filter((i) => i.equippedSlot);
   const backpack = items.filter((i) => i.location === "BACKPACK");
   const combat = playerCombat(equipped, backpack);
+  const sp = spaceOf(exp);
   const rng = mulberry32(hashSeed(exp.seed, exp.posX, exp.posY, player.health, Math.floor(Math.random() * 1e9)));
   const log = ((exp.log as unknown as string[]) ?? []).slice(0, 12);
-  const key = `${exp.posX},${exp.posY}`;
+  const key = tkey(exp.zoneKey, exp.posX, exp.posY);
   const ground = ((exp.ground as unknown as Record<string, GroundEntry[]>) ?? {}) as Record<string, GroundEntry[]>;
 
   let health = player.health;
@@ -870,10 +927,9 @@ export async function resolveEncounter(playerId: string, choice: "fight" | "flee
       const reward = (SURV.xpPerKill + pending.power / 4) * (pending.elite ? 1.8 : 1);
       xp += Math.round(reward);
       // The body's loot drops onto the ground for you to take.
-      const ec = zoneCtx(exp);
-      const tier = ec?.tier ?? 1;
-      const eSeed = ec?.seed ?? exp.seed;
-      const drops = lootForTile(eSeed, { ...tileAt(eSeed, exp.posX, exp.posY, tier), feature: "CACHE" });
+      const tier = spaceTier(sp, exp.posX, exp.posY);
+      const baseTile = spaceTile(sp, exp.posX, exp.posY);
+      const drops = lootForTile(sp.lootSeed, { ...baseTile, feature: "CACHE" });
       const added = addToGround(ground, key, drops.slice(0, (1 + Math.floor(tier / 2)) * (pending.elite ? 2 : 1)));
       log.unshift(`🎖️ Defeated the ${pending.name}. +${Math.round(reward)} XP${added ? `. They dropped ${added} — on the ground` : ""}.`);
       // Killing a faction's fighters sours your standing with them (and warms a rival).
@@ -898,7 +954,10 @@ export async function resolveEncounter(playerId: string, choice: "fight" | "flee
     return applyDeath(playerId, exp.id, `The ${pending.name} got you.`);
   }
 
-  await prisma.expedition.update({ where: { id: exp.id }, data: { log, ground: ground as unknown as Prisma.InputJsonValue, pending: newPending ? (newPending as unknown as Prisma.InputJsonValue) : Prisma.DbNull } });
+  // A defeated foe is gone for good this venture — clear its tile.
+  const cleared = new Set((exp.cleared as unknown as string[]) ?? []);
+  if (choice === "fight" && newPending === null) cleared.add(key);
+  await prisma.expedition.update({ where: { id: exp.id }, data: { log, ground: ground as unknown as Prisma.InputJsonValue, cleared: [...cleared], pending: newPending ? (newPending as unknown as Prisma.InputJsonValue) : Prisma.DbNull } });
   await prisma.player.update({ where: { id: playerId }, data: { health, stamina, xp, level, maxHealth: 100 + (level - 1) * 10 } });
   revalidatePath("/");
   return loadSnapshot(playerId);
@@ -1112,9 +1171,12 @@ export async function returnHome(playerId: string): Promise<GameSnapshot | null>
   if (!player?.shelter || player.state !== "IN_EXPEDITION") return loadSnapshot(playerId);
   const exp = await prisma.expedition.findFirst({ where: { playerId, status: "ACTIVE" } });
   if (!exp) return loadSnapshot(playerId);
-  if (exp.zoneKey) return loadSnapshot(playerId, "Leave the zone before heading home.");
+  if (exp.pending) return loadSnapshot(playerId, "Deal with the threat first.");
+  if (exp.zoneKey) return loadSnapshot(playerId, "Step back out onto the street first.");
+  const nearShelter = Math.max(Math.abs(exp.posX - SHELTER_DOOR[0]), Math.abs(exp.posY - SHELTER_DOOR[1])) <= 1;
+  if (!nearShelter) return loadSnapshot(playerId, "Make your way back to the shelter to bank your haul.");
 
-  // Banking from the overview map is safe — the risk is inside the zones.
+  // Banking at the shelter is safe — the risk is out in the city.
   const rng = mulberry32(hashSeed(exp.seed, 777, Math.floor(Math.random() * 1e9)));
   const health = player.health;
   const bitten = 0;

@@ -5,7 +5,6 @@ import { useGame, PID_KEY } from "@/store/game";
 import { getState } from "@/app/actions";
 import StartScreen from "@/components/StartScreen";
 import ShelterView from "@/components/ShelterView";
-import OverviewMap from "@/components/OverviewMap";
 import WastelandView from "@/components/WastelandView";
 
 export default function Page() {
@@ -47,7 +46,6 @@ export default function Page() {
   if (booting) return <Center>Recovering signal…</Center>;
   if (!playerId || !snapshot) return <StartScreen />;
   if (snapshot.player.state !== "IN_EXPEDITION") return <ShelterView />;
-  if (snapshot.overview) return <OverviewMap />;
   return <WastelandView />;
 }
 

@@ -24,35 +24,24 @@ export interface TileView {
   visited?: boolean; // part of your trail
   spotted?: boolean; // seen from afar via look — contents known, not entered
   scouted?: boolean; // adjacent — terrain visible, contents hidden
-  edge?: boolean; // outside the zone bounds — impassable rubble
+  edge?: boolean; // outside the map bounds
+  kind?: string; // city terrain: STREET | LOT | BUILDING | DOOR | SHELTER
+  buildingName?: string; // name of the building a DOOR leads to
   icon?: string;
   label?: string;
   feature?: string;
   color?: string;
   isPlayer?: boolean;
-  isExit?: boolean;
+  isExit?: boolean; // interior tile that returns you to the street
 }
 
-export interface OverviewZone {
-  key: string;
-  name: string;
-  type: string; // SAFE | POI | DANGER | WASTELAND
-  x: number; // 0–100 map %
-  y: number;
-  tier: number;
+export interface MinimapBuilding {
+  x: number;
+  y: number; // door tile in city coords
   icon: string;
-  color: string;
-  faction: string | null;
-  standing: string | null;
-}
-
-export interface OverviewView {
-  conditionName: string;
-  conditionIcon: string;
-  conditionNote: string;
-  zones: OverviewZone[];
-  backpackCount: number;
-  carryCap: number;
+  name: string;
+  tier: number;
+  here: boolean; // the building you're currently inside
 }
 
 export interface GroundItemView {
@@ -108,16 +97,14 @@ export type EncounterView = EnemyEncounter | SurvivorEncounter | TraderEncounter
 
 export interface ExpeditionView {
   id: string;
-  seed: number;
+  mode: "CITY" | "INTERIOR";
   posX: number;
   posY: number;
-  distance: number;
   tier: number;
   tiles: TileView[]; // window around the player
   windowRadius: number;
-  zoneName: string;
-  zoneType: string;
-  gridSize: number;
+  locationName: string; // "City Streets" or the building's name
+  locationIcon: string;
   biomeColor: string;
   biomeName: string;
   condition: string;
@@ -135,7 +122,12 @@ export interface ExpeditionView {
   searchedHere: boolean;
   pending: EncounterView | null;
   currentLabel: string;
-  atExit: boolean;
+  onDoor: { id: string; name: string } | null; // standing on a building door
+  nearShelter: boolean; // on/next to the shelter — can bank
+  // minimap (city-wide)
+  cityDim: number;
+  minimap: MinimapBuilding[];
+  shelter: { x: number; y: number };
 }
 
 export interface ShelterView {
@@ -200,7 +192,6 @@ export interface GameSnapshot {
   equipped: Record<string, ItemView | null>;
   craftables: CraftableView[];
   factions: FactionStanding[];
-  overview: OverviewView | null; // the city map (between zones)
-  expedition: ExpeditionView | null; // exploring a zone
+  expedition: ExpeditionView | null; // out in the city / inside a building
   flash: string | null; // one-off message (e.g. death summary)
 }
