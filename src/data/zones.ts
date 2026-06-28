@@ -42,6 +42,30 @@ export const ZONES: ZoneDef[] = [
   { key: "raider_camp", name: "Raider Camp", type: "DANGER", x: 87, y: 53, tier: 5, size: 9, biome: "IRRADIATED", faction: "RAIDERS" },
 ];
 
+// Road network — the believable routes between zones. Drawn as an overlay on
+// the city map so the markers read as a connected map, not pins on a photo.
+// Every zone is reachable from the shelter through this graph.
+export const LINKS: [string, string][] = [
+  ["shelter", "gas_station"],
+  ["shelter", "collapsed_highway"],
+  ["shelter", "apartment_complex"],
+  ["collapsed_highway", "water_treatment"],
+  ["gas_station", "hospital"],
+  ["hospital", "suburbs"],
+  ["hospital", "downtown"],
+  ["hospital", "abandoned_mall"],
+  ["abandoned_mall", "military_checkpoint"],
+  ["downtown", "bridge_out"],
+  ["downtown", "military_checkpoint"],
+  ["bridge_out", "power_station"],
+  ["bridge_out", "apartment_complex"],
+  ["military_checkpoint", "industrial_zone"],
+  ["industrial_zone", "power_station"],
+  ["power_station", "raider_camp"],
+  ["raider_camp", "train_yard"],
+  ["apartment_complex", "train_yard"],
+];
+
 export const ZONES_BY_KEY: Record<string, ZoneDef> = Object.fromEntries(ZONES.map((z) => [z.key, z]));
 export const ZONE_INDEX: Record<string, number> = Object.fromEntries(ZONES.map((z, i) => [z.key, i]));
 

@@ -3,6 +3,7 @@
 import { useGame } from "@/store/game";
 import { Btn, Meter, useAction } from "@/components/ui";
 import { enterZone, returnHome } from "@/app/actions";
+import { LINKS } from "@/data/zones";
 import type { OverviewZone } from "@/lib/types";
 
 const LEGEND: { type: string; icon: string; color: string; label: string }[] = [
@@ -24,6 +25,11 @@ export default function OverviewMap() {
     else run(() => enterZone(player.id, z.key));
   };
 
+  // Resolve the road network into draw-able segments in the 0–100 coordinate
+  // space the markers live in, so roads and pins always correlate.
+  const pos: Record<string, OverviewZone> = Object.fromEntries(ov.zones.map((z) => [z.key, z]));
+  const roads = LINKS.map(([a, b]) => ({ a: pos[a], b: pos[b] })).filter((s) => s.a && s.b);
+
   return (
     <div className="grime relative flex h-full w-full flex-col gap-2 overflow-y-auto scroll-thin p-2">
       {/* HUD */}
@@ -39,17 +45,58 @@ export default function OverviewMap() {
         </div>
       </div>
 
-      {/* The city map: zones plotted by coordinate over the backdrop */}
+      {/* The city map: a correlated overlay (roads, grid, zones) drawn on top
+          of a dimmed, desaturated atmospheric backdrop image. */}
       <div
         className="panel relative w-full shrink-0 overflow-hidden rounded"
-        style={{
-          aspectRatio: "5 / 4",
-          backgroundColor: "#0b0908",
-          backgroundImage: "linear-gradient(180deg, rgba(12,10,8,0.35), rgba(12,10,8,0.55)), url('/citymap.png')",
-          backgroundSize: "cover",
-          backgroundPosition: "center",
-        }}
+        style={{ aspectRatio: "5 / 4", backgroundColor: "#0b0908" }}
       >
+        {/* atmospheric backdrop — purely decorative, heavily dimmed so the
+            overlay reads clearly even though the art doesn't match coordinates */}
+        <div
+          className="pointer-events-none absolute inset-0"
+          style={{
+            backgroundImage: "url('/citymap.png')",
+            backgroundSize: "cover",
+            backgroundPosition: "center",
+            filter: "grayscale(0.7) brightness(0.42) contrast(1.05) sepia(0.25)",
+          }}
+        />
+        <div className="pointer-events-none absolute inset-0" style={{ background: "radial-gradient(120% 90% at 44% 82%, rgba(123,191,90,0.10), transparent 55%), linear-gradient(180deg, rgba(10,8,7,0.45), rgba(10,8,7,0.72))" }} />
+
+        {/* correlated overlay — same 0–100 space as the markers */}
+        <svg className="pointer-events-none absolute inset-0 h-full w-full" viewBox="0 0 100 100" preserveAspectRatio="none">
+          {/* faint coordinate grid */}
+          {Array.from({ length: 9 }, (_, i) => (i + 1) * 10).map((g) => (
+            <g key={g} stroke="rgba(224,163,46,0.06)" strokeWidth={0.2}>
+              <line x1={g} y1={0} x2={g} y2={100} />
+              <line x1={0} y1={g} x2={100} y2={g} />
+            </g>
+          ))}
+          {/* road casings then centerlines */}
+          {roads.map((s, i) => (
+            <line key={`c${i}`} x1={s.a.x} y1={s.a.y} x2={s.b.x} y2={s.b.y} stroke="rgba(20,16,13,0.85)" strokeWidth={2.4} strokeLinecap="round" />
+          ))}
+          {roads.map((s, i) => (
+            <line key={`r${i}`} x1={s.a.x} y1={s.a.y} x2={s.b.x} y2={s.b.y} stroke="rgba(190,170,120,0.32)" strokeWidth={0.7} strokeLinecap="round" strokeDasharray="1.6 1.6" />
+          ))}
+        </svg>
+
+        {/* region glows behind each zone, tinted by its type */}
+        {ov.zones.map((z) => (
+          <div
+            key={`glow-${z.key}`}
+            className="pointer-events-none absolute -translate-x-1/2 -translate-y-1/2 rounded-full"
+            style={{
+              left: `${z.x}%`,
+              top: `${z.y}%`,
+              width: z.type === "SAFE" ? "22%" : "16%",
+              height: z.type === "SAFE" ? "22%" : "16%",
+              background: `radial-gradient(circle, ${z.color}33, transparent 70%)`,
+            }}
+          />
+        ))}
+
         {/* legend */}
         <div className="panel absolute left-1 top-1 z-10 rounded p-1.5 text-[0.55rem]">
           {LEGEND.map((l) => (
