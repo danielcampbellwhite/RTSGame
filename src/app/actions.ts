@@ -366,6 +366,10 @@ async function loadSnapshot(playerId: string, flash: string | null = null): Prom
         currentLabel,
         onDoor,
         nearShelter,
+        ventureSeed: exp.seed,
+        buildingId: exp.zoneKey,
+        searched: [...searched],
+        cleared: [...cleared],
         cityDim: CITY_DIM,
         minimap: BUILDINGS.map((b) => ({ x: b.doorX, y: b.doorY, icon: b.icon, name: b.name, tier: b.tier, here: exp.zoneKey === b.id })),
         shelter: { x: SHELTER_DOOR[0], y: SHELTER_DOOR[1] },
@@ -786,6 +790,75 @@ export async function move(playerId: string, dir: Dir): Promise<GameSnapshot | n
     data: { posX: x, posY: y, visited: [...visited], cleared: [...cleared], log, pending: pending ? (pending as unknown as Prisma.InputJsonValue) : Prisma.DbNull },
   });
   await prisma.player.update({ where: { id: playerId }, data: { health, radiation, stamina } });
+  revalidatePath("/");
+  return loadSnapshot(playerId);
+}
+
+/** The client renders + drives movement in real time; it commits the tile it
+ *  settles on here so server-side actions (search, bank, battle) act on the
+ *  right place. Landing on a fresh hazard tile still doses radiation. */
+export async function syncPos(playerId: string, x: number, y: number): Promise<GameSnapshot | null> {
+  const player = await prisma.player.findUnique({ where: { id: playerId } });
+  if (!player || player.state !== "IN_EXPEDITION") return loadSnapshot(playerId);
+  const exp = await prisma.expedition.findFirst({ where: { playerId, status: "ACTIVE" } });
+  if (!exp || exp.pending) return loadSnapshot(playerId);
+  const sp = spaceOf(exp);
+  if (sp.mode === "CITY") {
+    if (!passable(x, y)) return loadSnapshot(playerId);
+  } else if (!inBounds(sp.size, x, y)) {
+    return loadSnapshot(playerId);
+  }
+  const key = tkey(exp.zoneKey, x, y);
+  const visited = new Set((exp.visited as unknown as string[]) ?? []);
+  const firstVisit = !visited.has(key);
+  visited.add(key);
+  let health = player.health;
+  let radiation = player.radiation;
+  let log = ((exp.log as unknown as string[]) ?? []).slice(0, 18);
+  const stamina = clamp(player.stamina - SURV.moveStaminaCost + SURV.staminaRegenOnTile, 0, 100);
+
+  if (firstVisit) {
+    const cond = (exp.condition as Condition) ?? "CLEAR";
+    const tile = spaceTile(sp, x, y);
+    const narr = mulberry32(hashSeed(sp.lootSeed, x, y, 555));
+    if (tile.feature === "HAZARD") {
+      const stormMult = cond === "RAD_STORM" ? 1.6 : 1;
+      const dose = Math.round(randInt(narr, SURV.radPerHazard[0], SURV.radPerHazard[1]) * (tile.hazard === "RADIATION" ? 1 : 0.6) * stormMult);
+      radiation = clamp(radiation + dose);
+      log.unshift(`${tile.icon} ${hazardLine(narr, tile.hazard!)} (+${dose} rad)`);
+    }
+    if (radiation > SURV.radDamageThreshold) {
+      const chip = Math.round((radiation - SURV.radDamageThreshold) / 8);
+      if (chip > 0) { health = Math.max(0, health - chip); log.unshift(`☢ Radiation sickness gnaws at you (−${chip} HP).`); }
+    }
+    log = log.slice(0, 24);
+  }
+
+  if (health <= 0) return applyDeath(playerId, exp.id, "The wasteland claimed you.");
+  await prisma.expedition.update({ where: { id: exp.id }, data: { posX: x, posY: y, visited: [...visited], log } });
+  await prisma.player.update({ where: { id: playerId }, data: { health, radiation, stamina } });
+  revalidatePath("/");
+  return loadSnapshot(playerId);
+}
+
+/** Begin a battle with a roaming enemy the client walked into. The enemy's
+ *  home tile (ox,oy) becomes the player's position so a win clears that tile
+ *  and drops loot there. */
+export async function engage(playerId: string, enemyKey: string, tier: number, ox: number, oy: number): Promise<GameSnapshot | null> {
+  const player = await prisma.player.findUnique({ where: { id: playerId } });
+  if (!player || player.state !== "IN_EXPEDITION") return loadSnapshot(playerId);
+  const exp = await prisma.expedition.findFirst({ where: { playerId, status: "ACTIVE" } });
+  if (!exp || exp.pending) return loadSnapshot(playerId);
+  const def = ENEMIES[enemyKey];
+  if (!def) return loadSnapshot(playerId);
+  const t = Math.max(1, Math.min(5, tier));
+  const elite = t >= 4 && chance(mulberry32(hashSeed(exp.seed, ox, oy, 77)), 0.2);
+  const power = Math.round(def.power * (1 + (t - 1) * 0.35) * (elite ? 1.6 : 1));
+  const name = elite ? `Elite ${def.name}` : def.name;
+  const pending: EncounterView = { kind: "enemy", enemyKey, name, icon: elite ? "☠️" : def.icon, power, hp: power, maxHp: power, faction: null, elite };
+  const log = ((exp.log as unknown as string[]) ?? []).slice(0, 18);
+  log.unshift(`${pending.icon} ${enemyEntrance(mulberry32(hashSeed(exp.seed, ox, oy, 99)), name)}`);
+  await prisma.expedition.update({ where: { id: exp.id }, data: { posX: ox, posY: oy, log, pending: pending as unknown as Prisma.InputJsonValue } });
   revalidatePath("/");
   return loadSnapshot(playerId);
 }

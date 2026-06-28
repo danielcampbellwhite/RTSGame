@@ -5,7 +5,7 @@ import { useGame, PID_KEY } from "@/store/game";
 import { getState } from "@/app/actions";
 import StartScreen from "@/components/StartScreen";
 import ShelterView from "@/components/ShelterView";
-import WastelandView from "@/components/WastelandView";
+import Overworld from "@/components/Overworld";
 
 export default function Page() {
   const playerId = useGame((s) => s.playerId);
@@ -46,7 +46,7 @@ export default function Page() {
   if (booting) return <Center>Recovering signal…</Center>;
   if (!playerId || !snapshot) return <StartScreen />;
   if (snapshot.player.state !== "IN_EXPEDITION") return <ShelterView />;
-  return <WastelandView />;
+  return <Overworld />;
 }
 
 function Center({ children }: { children: React.ReactNode }) {

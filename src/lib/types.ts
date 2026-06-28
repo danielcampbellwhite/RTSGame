@@ -124,6 +124,11 @@ export interface ExpeditionView {
   currentLabel: string;
   onDoor: { id: string; name: string } | null; // standing on a building door
   nearShelter: boolean; // on/next to the shelter — can bank
+  // real-time engine state (client renders the world deterministically)
+  ventureSeed: number; // re-rolls enemies/loot each venture
+  buildingId: string | null; // null = streets, else the interior you're inside
+  searched: string[]; // tile keys already searched this venture
+  cleared: string[]; // tile keys whose enemy/NPC is gone this venture
   // minimap (city-wide)
   cityDim: number;
   minimap: MinimapBuilding[];
