@@ -17,7 +17,7 @@ const RES: { k: "food" | "water" | "meds" | "ammo" | "scrap" | "fuel"; name: str
   { k: "fuel", name: "Fuel", icon: "⛽" },
 ];
 
-type Page = "home" | "loadout" | "crew" | "craft" | "build" | "factions" | "stores";
+type Page = "home" | "loadout" | "crew" | "craft" | "build" | "stores";
 
 const MENU: { key: Page; icon: string; label: string }[] = [
   { key: "loadout", icon: "🎒", label: "Loadout" },
@@ -25,12 +25,11 @@ const MENU: { key: Page; icon: string; label: string }[] = [
   { key: "crew", icon: "👥", label: "Crew" },
   { key: "craft", icon: "🔨", label: "Crafting" },
   { key: "build", icon: "🏗️", label: "Build" },
-  { key: "factions", icon: "🤝", label: "Factions" },
 ];
 
 const PAGE_TITLE: Record<Page, string> = {
   home: "Shelter", loadout: "Loadout", crew: "Crew", craft: "Crafting",
-  build: "Build", factions: "Factions", stores: "Shelter Stores",
+  build: "Build", stores: "Shelter Stores",
 };
 
 const SLOTS: { key: string; label: string }[] = [
@@ -60,7 +59,7 @@ export default function ShelterView() {
   const snap = useGame((s) => s.snapshot)!;
   const { run, isPending } = useAction();
   const [page, setPage] = useState<Page>("home");
-  const { player, shelter, storage, equipped, craftables, factions } = snap;
+  const { player, shelter, storage, equipped, craftables } = snap;
 
   const idle = shelter.population - (shelter.workFood + shelter.workWater + shelter.workScrap + shelter.workMeds);
   const readyCraft = craftables.filter((c) => c.affordable).length;
@@ -72,7 +71,6 @@ export default function ShelterView() {
     crew: idle > 0 ? `${idle} idle` : `${shelter.population} working`,
     craft: readyCraft > 0 ? `${readyCraft} ready` : "stations",
     build: `🔩 ${shelter.scrap} · ⛽ ${shelter.fuel}`,
-    factions: "standings",
   };
 
   if (page !== "home") {
@@ -99,27 +97,6 @@ export default function ShelterView() {
         {page === "stores" && <Stores shelter={shelter} />}
         {page === "crew" && (
           <Crew shelter={shelter} onAssign={(job, d) => run(() => assignWork(player.id, job, d))} busy={isPending} />
-        )}
-        {page === "factions" && (
-          <div className="space-y-2">
-            <p className="text-[0.66rem] text-[var(--ink-dim)]">
-              Your standing across the city&apos;s powers. Help their people to gain favour; kill their fighters and they&apos;ll hunt you.
-            </p>
-            {factions.map((f) => {
-              const pct = ((f.rep + 100) / 200) * 100;
-              const col = f.rep >= 25 ? "var(--good)" : f.rep > -25 ? "var(--amber)" : "var(--blood)";
-              return (
-                <div key={f.key} className="inset rounded p-2">
-                  <div className="flex items-center justify-between text-xs">
-                    <span style={{ color: f.color }}>{f.icon} {f.name}</span>
-                    <span style={{ color: col }}>{f.standing} ({f.rep > 0 ? "+" : ""}{f.rep})</span>
-                  </div>
-                  <div className="meter mt-1"><i style={{ width: `${pct}%`, background: col }} /></div>
-                  <div className="mt-1 text-[0.58rem] text-[var(--ink-dim)]">{f.note}</div>
-                </div>
-              );
-            })}
-          </div>
         )}
         {page === "craft" && (
           <div className="space-y-1">

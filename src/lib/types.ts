@@ -61,7 +61,6 @@ export interface EnemyEncounter {
   power: number;
   hp: number;
   maxHp: number;
-  faction?: string | null;
   elite?: boolean;
 }
 
@@ -111,9 +110,6 @@ export interface ExpeditionView {
   conditionName: string;
   conditionIcon: string;
   conditionNote: string;
-  territoryFaction: string | null; // controlling faction key
-  territoryName: string | null;
-  territoryStanding: string | null;
   log: string[];
   backpack: ItemView[];
   backpackUsed: number;
@@ -180,23 +176,12 @@ export interface CraftableView {
   detail: string;
 }
 
-export interface FactionStanding {
-  key: string;
-  name: string;
-  icon: string;
-  color: string;
-  note: string;
-  rep: number;
-  standing: string;
-}
-
 export interface GameSnapshot {
   player: PlayerView;
   shelter: ShelterView;
   storage: ItemView[];
   equipped: Record<string, ItemView | null>;
   craftables: CraftableView[];
-  factions: FactionStanding[];
   expedition: ExpeditionView | null; // out in the city / inside a building
   flash: string | null; // one-off message (e.g. death summary)
 }

@@ -18,7 +18,6 @@ import { mulberry32, hashSeed, randInt, chance, weighted, pick } from "@/lib/rng
 import { lootForTile, enemyForTile, wanderingEnemy, generateLoot, type Tile } from "@/lib/wasteland";
 import { BIOMES, ENEMIES } from "@/data/world";
 import { sightFor, ambientLine, enemyEntrance, hazardLine, searchNothing, survivorIntro } from "@/data/flavor";
-import { factionAt, FACTIONS, FACTION_KEYS, RIVAL, standing, type FactionKey, type RepMap } from "@/data/factions";
 import { CONDITIONS, rollCondition, type Condition } from "@/data/conditions";
 import {
   CITY_DIM, BUILDINGS, BUILDINGS_BY_ID, SHELTER_DOOR,
@@ -78,15 +77,6 @@ function nearbyNotables(sp: Space, x: number, y: number): string {
     if (NOTABLE_FEATURES.has(t.feature)) parts.push(`${t.label} to the ${name}`);
   }
   return parts.join("; ");
-}
-
-/** Apply standing changes to a player's faction reputation map (clamped ±100). */
-async function adjustRep(playerId: string, current: RepMap, changes: Partial<Record<FactionKey, number>>): Promise<void> {
-  const next: RepMap = { ...current };
-  for (const k of Object.keys(changes) as FactionKey[]) {
-    next[k] = clamp((next[k] ?? 0) + (changes[k] ?? 0), -100, 100);
-  }
-  await prisma.player.update({ where: { id: playerId }, data: { factionRep: next as unknown as Prisma.InputJsonValue } });
 }
 
 const NOTABLE_FEATURES = new Set(["LOOT", "ENEMY", "HAZARD", "SURVIVOR"]);
@@ -353,9 +343,6 @@ async function loadSnapshot(playerId: string, flash: string | null = null): Prom
         conditionName: condDef.name,
         conditionIcon: condDef.icon,
         conditionNote: condDef.note,
-        territoryFaction: null,
-        territoryName: null,
-        territoryStanding: null,
         log: ((exp.log as unknown as string[]) ?? []).slice(0, 16),
         backpack: backpack.map(itemView),
         backpackUsed: backpack.reduce((n, b) => n + b.quantity, 0),
@@ -416,10 +403,6 @@ async function loadSnapshot(playerId: string, flash: string | null = null): Prom
     storage: storage.map(itemView),
     equipped,
     craftables,
-    factions: FACTION_KEYS.map((k) => {
-      const rep = ((player.factionRep as RepMap) ?? {})[k] ?? 0;
-      return { key: k, name: FACTIONS[k].name, icon: FACTIONS[k].icon, color: FACTIONS[k].color, note: FACTIONS[k].note, rep, standing: standing(rep) };
-    }),
     expedition,
     flash,
   };
@@ -697,7 +680,7 @@ export async function move(playerId: string, dir: Dir): Promise<GameSnapshot | n
         const elite = tier >= 4 && chance(narr, 0.2);
         const power = Math.round(e.power * (elite ? 1.6 : 1));
         const name = elite ? `Elite ${e.name}` : e.name;
-        pending = { kind: "enemy", enemyKey: e.key, name, icon: elite ? "☠️" : e.icon, power, hp: power, maxHp: power, faction: null, elite };
+        pending = { kind: "enemy", enemyKey: e.key, name, icon: elite ? "☠️" : e.icon, power, hp: power, maxHp: power, elite };
         entry.push(`${pending.icon} ${enemyEntrance(narr, name)}`);
       } else if (f.feature === "LOOT") {
         const searched = new Set((exp.searched as unknown as string[]) ?? []);
@@ -717,7 +700,7 @@ export async function move(playerId: string, dir: Dir): Promise<GameSnapshot | n
       const elite = tier >= 4 && chance(narr, 0.25);
       const power = Math.round(e.power * (elite ? 1.6 : 1));
       const name = elite ? `Elite ${e.name}` : e.name;
-      pending = { kind: "enemy", enemyKey: e.key, name, icon: elite ? "☠️" : e.icon, power, hp: power, maxHp: power, faction: null, elite };
+      pending = { kind: "enemy", enemyKey: e.key, name, icon: elite ? "☠️" : e.icon, power, hp: power, maxHp: power, elite };
       entry.push(`${pending.icon} ${enemyEntrance(narr, name)}`);
     } else if (tile.feature === "SURVIVOR" && !cleared.has(key)) {
       const name = tile.survivorName ?? "a stranger";
@@ -759,7 +742,7 @@ export async function move(playerId: string, dir: Dir): Promise<GameSnapshot | n
 
   if (!pending && firstVisit && cond === "RAIDER_ACTIVITY" && chance(narr, 0.14)) {
     const e = wanderingEnemy(narr, tier);
-    pending = { kind: "enemy", enemyKey: e.key, name: e.name, icon: e.icon, power: e.power, hp: e.power, maxHp: e.power, faction: null };
+    pending = { kind: "enemy", enemyKey: e.key, name: e.name, icon: e.icon, power: e.power, hp: e.power, maxHp: e.power };
     entry.push(`${e.icon} Ambush! ${enemyEntrance(narr, e.name)}`);
   }
 
@@ -855,7 +838,7 @@ export async function engage(playerId: string, enemyKey: string, tier: number, o
   const elite = t >= 4 && chance(mulberry32(hashSeed(exp.seed, ox, oy, 77)), 0.2);
   const power = Math.round(def.power * (1 + (t - 1) * 0.35) * (elite ? 1.6 : 1));
   const name = elite ? `Elite ${def.name}` : def.name;
-  const pending: EncounterView = { kind: "enemy", enemyKey, name, icon: elite ? "☠️" : def.icon, power, hp: power, maxHp: power, faction: null, elite };
+  const pending: EncounterView = { kind: "enemy", enemyKey, name, icon: elite ? "☠️" : def.icon, power, hp: power, maxHp: power, elite };
   const log = ((exp.log as unknown as string[]) ?? []).slice(0, 18);
   log.unshift(`${pending.icon} ${enemyEntrance(mulberry32(hashSeed(exp.seed, ox, oy, 99)), name)}`);
   await prisma.expedition.update({ where: { id: exp.id }, data: { posX: ox, posY: oy, log, pending: pending as unknown as Prisma.InputJsonValue } });
@@ -979,12 +962,6 @@ export async function resolveEncounter(playerId: string, choice: "fight" | "flee
       const drops = lootForTile(sp.lootSeed, { ...baseTile, feature: "CACHE" });
       const added = addToGround(ground, key, drops.slice(0, (1 + Math.floor(tier / 2)) * (pending.elite ? 2 : 1)));
       log.unshift(`🎖️ Defeated the ${pending.name}. +${Math.round(reward)} XP${added ? `. They dropped ${added} — on the ground` : ""}.`);
-      // Killing a faction's fighters sours your standing with them (and warms a rival).
-      const f = pending.faction as FactionKey | null | undefined;
-      if (f) {
-        await adjustRep(playerId, (player.factionRep as RepMap) ?? {}, { [f]: -4, [RIVAL[f]]: 2 });
-        log.unshift(`${FACTIONS[f].icon} Your standing with ${FACTIONS[f].name} has fallen.`);
-      }
     } else {
       newPending = { ...pending, hp: r.enemyHp };
     }
@@ -1025,10 +1002,6 @@ export async function recruitSurvivor(playerId: string, accept: boolean): Promis
     log.unshift(`${pending.name} would join you, but the shelter is full (${player.shelter.population}/${player.shelter.popCap}). Build more beds.`);
   } else {
     await prisma.shelter.update({ where: { id: player.shelter.id }, data: { population: { increment: 1 }, morale: { increment: 3 } } });
-    const f = factionAt(exp.seed, exp.posX, exp.posY);
-    const changes: Partial<Record<FactionKey, number>> = { COLLECTIVE: 5 };
-    if (f && f !== "COLLECTIVE") changes[f] = 3;
-    await adjustRep(playerId, (player.factionRep as RepMap) ?? {}, changes);
     log.unshift(`🤝 ${pending.name} will make their way to your shelter. Population +1.`);
   }
   const cleared = new Set((exp.cleared as unknown as string[]) ?? []);
@@ -1096,10 +1069,6 @@ export async function helpInjured(playerId: string, accept: boolean): Promise<Ga
   const joins = Math.random() < 0.5 && player.shelter.population < player.shelter.popCap;
   await prisma.player.update({ where: { id: playerId }, data: { reputation: { increment: 5 } } });
   if (joins) await prisma.shelter.update({ where: { id: player.shelter.id }, data: { population: { increment: 1 }, morale: { increment: 3 } } });
-  const hf = factionAt(exp.seed, exp.posX, exp.posY);
-  const hChanges: Partial<Record<FactionKey, number>> = { COLLECTIVE: 5 };
-  if (hf && hf !== "COLLECTIVE") hChanges[hf] = 3;
-  await adjustRep(playerId, (player.factionRep as RepMap) ?? {}, hChanges);
   log.unshift(`🩹 You patch up ${pending.name}. (+5 reputation)${joins ? ` Grateful, ${pending.name} will head to your shelter.` : ""}`);
   const cleared = new Set((exp.cleared as unknown as string[]) ?? []);
   cleared.add(tkey(exp.zoneKey, exp.posX, exp.posY));
