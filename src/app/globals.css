@@ -33,7 +33,7 @@ body {
 /* Global UI scale. Most sizing is rem-based, so this single lever enlarges
    text, padding and gaps together. Bumped up for readability on phones. */
 html {
-  font-size: 150%;
+  font-size: 120%;
 }
 
 *,

@@ -27,6 +27,21 @@ const SLOTS: { key: string; label: string }[] = [
   { key: "BACKPACK", label: "Pack" },
 ];
 
+/** Net change per real hour for a shelter resource (worker output − use). */
+function storeRate(s: ShelterViewT, k: string): number {
+  switch (k) {
+    case "food": return s.workFood * SURV.jobs.food - s.population * SURV.consume.food;
+    case "water": return s.workWater * SURV.jobs.water - s.population * SURV.consume.water;
+    case "meds": return s.workMeds * SURV.jobs.meds;
+    case "scrap": return s.workScrap * SURV.jobs.scrap;
+    case "fuel": return -SURV.fuelPerHour;
+    default: return 0;
+  }
+}
+function fmtRate(r: number): string {
+  return (Math.round(r * 10) / 10).toString();
+}
+
 export default function ShelterView() {
   const snap = useGame((s) => s.snapshot)!;
   const { run, isPending } = useAction();
@@ -75,12 +90,20 @@ export default function ShelterView() {
           {RES.map(({ k, name, icon }) => {
             const v = shelter[k];
             const low = v < 15;
+            const r = storeRate(shelter, k);
             return (
               <div key={k} className="inset flex items-center gap-1.5 rounded px-2 py-1">
                 <span className="text-base">{icon}</span>
                 <div className="leading-tight">
                   <div className="title text-[0.58rem] text-[var(--ink-dim)]">{name}</div>
-                  <div className="text-sm" style={{ color: low ? "var(--blood)" : "var(--ink)" }}>{Math.round(v)}</div>
+                  <div className="flex items-baseline gap-1">
+                    <span className="text-sm" style={{ color: low ? "var(--blood)" : "var(--ink)" }}>{Math.round(v)}</span>
+                    {r !== 0 && (
+                      <span className="text-[0.52rem]" style={{ color: r > 0 ? "var(--good)" : "var(--blood)" }}>
+                        {r > 0 ? "+" : ""}{fmtRate(r)}/h
+                      </span>
+                    )}
+                  </div>
                 </div>
               </div>
             );
