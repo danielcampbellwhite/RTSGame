@@ -790,9 +790,9 @@ export async function move(playerId: string, dir: Dir): Promise<GameSnapshot | n
   return loadSnapshot(playerId);
 }
 
-/** Non-movement interactions that make a tile feel alive: look around, search
- *  it thoroughly (loot or ambush), or rest to recover stamina (with risk). */
-export async function interact(playerId: string, kind: "look" | "search" | "rest"): Promise<GameSnapshot | null> {
+/** Non-movement interactions: search the tile (loot or ambush) or rest to
+ *  recover stamina (with risk). */
+export async function interact(playerId: string, kind: "search" | "rest"): Promise<GameSnapshot | null> {
   const player = await prisma.player.findUnique({ where: { id: playerId } });
   if (!player || player.state !== "IN_EXPEDITION") return loadSnapshot(playerId);
   const exp = await prisma.expedition.findFirst({ where: { playerId, status: "ACTIVE" } });
@@ -804,42 +804,13 @@ export async function interact(playerId: string, kind: "look" | "search" | "rest
   const tier = spaceTier(sp, exp.posX, exp.posY);
   const cond = (exp.condition as Condition) ?? "CLEAR";
   const key = tkey(exp.zoneKey, exp.posX, exp.posY);
-  const salt = kind === "search" ? 222 : kind === "rest" ? 333 : 111;
+  const salt = kind === "search" ? 222 : 333;
   const narr = mulberry32(hashSeed(sp.lootSeed, exp.posX, exp.posY, salt, Math.floor(Math.random() * 1e9)));
   let log = ((exp.log as unknown as string[]) ?? []).slice(0, 18);
   let stamina = player.stamina;
   let pending: EncounterView | null = null;
 
-  if (kind === "look") {
-    // Inspect the eight squares around you; pin what you see to the map.
-    log.unshift(`${tile.icon} ${tile.label}. ${sightFor(narr, tile.biome)}`);
-
-    const spotted = new Set((exp.spotted as unknown as string[]) ?? []);
-    const dirs8 = [
-      ["north", 0, -1], ["north-east", 1, -1], ["east", 1, 0], ["south-east", 1, 1],
-      ["south", 0, 1], ["south-west", -1, 1], ["west", -1, 0], ["north-west", -1, -1],
-    ] as const;
-    const sightings: string[] = [];
-    for (const [name, dx, dy] of dirs8) {
-      const nx = exp.posX + dx, ny = exp.posY + dy;
-      if (!inBounds(sp.size, nx, ny)) continue;
-      if (sp.mode === "CITY") {
-        const ter = cityTerrain(nx, ny);
-        if (ter.kind === "DOOR" && ter.building) { sightings.push(`${name}: ${ter.building.name} entrance`); continue; }
-        if (ter.kind === "SHELTER") { sightings.push(`${name}: your shelter`); continue; }
-        if (!passable(nx, ny)) continue;
-      }
-      spotted.add(tkey(exp.zoneKey, nx, ny));
-      const nt = spaceTile(sp, nx, ny);
-      if (NOTABLE_FEATURES.has(nt.feature)) sightings.push(`${name}: ${nt.label}`);
-    }
-    log.unshift(sightings.length ? `You scan your surroundings — ${sightings.join("; ")}.` : "Nothing notable in the squares around you.");
-
-    const worth = tile.feature === "LOOT" || tile.feature === "CACHE" || tile.biome === "URBAN" || tile.biome === "INDUSTRIAL";
-    log.unshift(worth ? "This place looks worth searching." : "Not much here worth digging through.");
-
-    await prisma.expedition.update({ where: { id: exp.id }, data: { spotted: [...spotted] } });
-  } else if (kind === "rest") {
+  if (kind === "rest") {
     stamina = clamp(stamina + 30);
     log.unshift("You find cover, slow your breathing, and recover. (+stamina)");
     if (chance(narr, 0.15 + tier * 0.05)) {

@@ -231,8 +231,7 @@ export default function WastelandView() {
               </div>
             ))}
           </div>
-          <div className="grid grid-cols-3 gap-1">
-            <Btn disabled={blocked} onClick={() => run(() => interact(player.id, "look"))}>Look</Btn>
+          <div className="grid grid-cols-2 gap-1">
             <Btn disabled={blocked || exp.searchedHere} onClick={() => run(() => interact(player.id, "search"))}>{exp.searchedHere ? "Searched" : "Search"}</Btn>
             <Btn disabled={blocked} onClick={() => run(() => interact(player.id, "rest"))}>Rest</Btn>
           </div>
@@ -362,8 +361,6 @@ function Terminal({ snap, run, disabled }: { snap: GameSnapshot; run: (fn: () =>
       if (exp.mode === "INTERIOR") return run(() => exitBuilding(player.id));
       if (!exp.nearShelter) return setNote("Head to your shelter (🏠) to bank.");
       run(() => returnHome(player.id));
-    } else if (["look", "l", "examine", "scan"].includes(verb)) {
-      run(() => interact(player.id, "look"));
     } else if (verb === "search") {
       if (exp.pending) return setNote("Deal with the threat first.");
       run(() => interact(player.id, "search"));
@@ -379,7 +376,7 @@ function Terminal({ snap, run, disabled }: { snap: GameSnapshot; run: (fn: () =>
       if (!item) return setNote("No matching consumable in your pack.");
       run(() => useConsumable(player.id, item.id));
     } else if (verb === "help") {
-      setNote("move: n s e w ne nw se sw · search · take · look · rest · enter · exit · fight · flee · recruit · buy [n] · aid · use [item] · return");
+      setNote("move: n s e w ne nw se sw · search · take · rest · enter · exit · fight · flee · recruit · buy [n] · aid · use [item] · return");
     } else {
       setNote(`Unknown command: ${verb}`);
     }
