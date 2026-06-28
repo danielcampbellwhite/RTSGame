@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useGame } from "@/store/game";
 import { Btn, Meter, useAction } from "@/components/ui";
 import { startExpedition, equipItem, unequipItem, useConsumable, craft, upgrade, assignWork, repairItem } from "@/app/actions";
-import { stationLevelReq } from "@/data/recipes";
+import { stationLevelReq, upgradeCost } from "@/data/recipes";
 import { SURV } from "@/lib/game";
 import type { ItemView, ShelterView as ShelterViewT } from "@/lib/types";
 
@@ -186,9 +186,14 @@ export default function ShelterView() {
         )}
         {tab === "build" && (
           <div className="space-y-1 text-xs">
-            <UpgradeRow label="Storage (+60 cap)" onClick={() => run(() => upgrade(player.id, "storage"))} busy={isPending} note={`cap ${shelter.storageCap}`} />
-            <UpgradeRow label="Beds (+2 population)" onClick={() => run(() => upgrade(player.id, "beds"))} busy={isPending} note={`pop ${shelter.population}/${shelter.popCap}`} />
-            <UpgradeRow label="Shelter level" onClick={() => run(() => upgrade(player.id, "shelter"))} busy={isPending} note={`L${shelter.level}`} />
+            <div className="title flex items-center justify-end gap-2 px-1 text-[0.58rem] text-[var(--ink-dim)]">
+              <span>have</span>
+              <span style={{ color: shelter.scrap > 0 ? "var(--ink)" : "var(--blood)" }}>🔩 {shelter.scrap}</span>
+              <span style={{ color: shelter.fuel > 0 ? "var(--ink)" : "var(--blood)" }}>⛽ {shelter.fuel}</span>
+            </div>
+            <UpgradeRow label="Storage (+60 cap)" onClick={() => run(() => upgrade(player.id, "storage"))} busy={isPending} note={`cap ${shelter.storageCap}`} cost={upgradeCost(Math.floor((shelter.storageCap - 240) / 60) + 2)} have={shelter} />
+            <UpgradeRow label="Beds (+2 population)" onClick={() => run(() => upgrade(player.id, "beds"))} busy={isPending} note={`pop ${shelter.population}/${shelter.popCap}`} cost={upgradeCost(Math.floor((shelter.popCap - 3) / 2) + 2)} have={shelter} />
+            <UpgradeRow label="Shelter level" onClick={() => run(() => upgrade(player.id, "shelter"))} busy={isPending} note={`L${shelter.level}`} cost={upgradeCost(shelter.level + 1)} have={shelter} />
             {([
               { label: "Workshop", t: "workshop" as const, lvl: shelter.workshopLvl },
               { label: "Medical Station", t: "medical" as const, lvl: shelter.medicalLvl },
@@ -205,6 +210,8 @@ export default function ShelterView() {
                   busy={isPending}
                   locked={locked}
                   note={locked ? `L${s.lvl} · 🔒 needs rank ${req}` : `L${s.lvl}`}
+                  cost={upgradeCost(s.lvl + 1)}
+                  have={shelter}
                 />
               );
             })}
@@ -366,14 +373,22 @@ function Empty({ children }: { children: React.ReactNode }) {
   return <div className="px-1 py-2 text-[0.66rem] text-[var(--ink-dim)]">{children}</div>;
 }
 
-function UpgradeRow({ label, note, onClick, busy, locked }: { label: string; note: string; onClick: () => void; busy: boolean; locked?: boolean }) {
+function UpgradeRow({ label, note, onClick, busy, locked, cost, have }: { label: string; note: string; onClick: () => void; busy: boolean; locked?: boolean; cost: { scrap: number; fuel: number }; have: ShelterViewT }) {
+  const canScrap = have.scrap >= cost.scrap;
+  const canFuel = have.fuel >= cost.fuel;
+  const affordable = canScrap && canFuel;
   return (
     <div className="inset flex items-center justify-between rounded px-2 py-1.5">
       <div>
         <div>{label}</div>
-        <div className="text-[0.66rem]" style={{ color: locked ? "var(--blood)" : "var(--ink-dim)" }}>{note}</div>
+        <div className="flex items-center gap-2 text-[0.66rem]">
+          <span style={{ color: locked ? "var(--blood)" : "var(--ink-dim)" }}>{note}</span>
+          <span className="text-[var(--ink-dim)]">·</span>
+          <span style={{ color: canScrap ? "var(--ink-dim)" : "var(--blood)" }}>🔩 {cost.scrap}</span>
+          <span style={{ color: canFuel ? "var(--ink-dim)" : "var(--blood)" }}>⛽ {cost.fuel}</span>
+        </div>
       </div>
-      <Btn disabled={busy || locked} onClick={onClick}>{locked ? "Locked" : "Upgrade"}</Btn>
+      <Btn disabled={busy || locked || !affordable} onClick={onClick}>{locked ? "Locked" : "Upgrade"}</Btn>
     </div>
   );
 }
