@@ -167,11 +167,14 @@ const STREET_LOOT: { icon: string; label: string }[] = [
 export function cityFeature(ventureSeed: number, x: number, y: number): Tile {
   const tier = cityTierAt(x, y);
   const rng = tileRng(hashSeed(ventureSeed, 4242), x, y);
+  // A safe perimeter around the shelter — no roamers near home, so you can
+  // always step out and get your bearings before trouble finds you.
+  const nearHome = Math.max(Math.abs(x - SHELTER_DOOR[0]), Math.abs(y - SHELTER_DOOR[1])) <= 5;
   // Streets are mostly bare tarmac — real hauls are inside the buildings, and
   // roamers are sparse so each one reads as a real threat.
   const feature = weighted<FeatureKind>(rng, [
     ["EMPTY", 92],
-    ["ENEMY", 5 + tier],
+    ["ENEMY", nearHome ? 0 : 5 + tier],
     ["LOOT", 5],
   ]);
   if (feature === "ENEMY") {
@@ -187,10 +190,16 @@ export function cityFeature(ventureSeed: number, x: number, y: number): Tile {
   return { x, y, biome: "URBAN", tier, feature: "EMPTY", icon: "·", label: "Street" };
 }
 
-/** A bounded interior tile. Loot tiles are themed to the building's archetype. */
+/** A bounded interior tile. Loot tiles are themed to the building's archetype.
+ *  The entrance (and the tiles next to it) is always clear of enemies so you
+ *  can step in — and back out — without being cornered. */
 export function interiorTile(building: Building, ventureSeed: number, x: number, y: number): Tile {
   const seed = hashSeed(ventureSeed, building.seedSalt);
   const t = tileAt(seed, x, y, building.tier);
+  const ex = Math.floor(building.size / 2), ey = building.size - 1;
+  if (t.feature === "ENEMY" && Math.max(Math.abs(x - ex), Math.abs(y - ey)) <= 1) {
+    return { x, y, biome: t.biome, tier: building.tier, feature: "EMPTY", icon: "·", label: "Floor" };
+  }
   if (t.feature === "LOOT") {
     const loc = LOCATIONS[building.lootKey];
     return { ...t, locationKey: building.lootKey, icon: loc.icon, label: loc.name };

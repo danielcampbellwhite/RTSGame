@@ -64,7 +64,7 @@ export default function Overworld() {
         px: exp.posX, py: exp.posY, face: "S", moving: false,
         fromX: exp.posX, fromY: exp.posY, toX: exp.posX, toY: exp.posY, mt: 0,
         camX: exp.posX, camY: exp.posY, enemies: new Map(),
-        lastEnemyTick: 0, t: 0, cooldown: 0, prevBattling: false,
+        lastEnemyTick: 0, t: 0, cooldown: 900, prevBattling: false,
       };
     }
   }, [exp]);

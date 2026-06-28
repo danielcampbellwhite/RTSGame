@@ -71,10 +71,10 @@ export function tileAt(seed: number, x: number, y: number, tierOverride?: number
 
   // Feature distribution shifts toward danger + density with tier.
   const feature = weighted<FeatureKind>(rng, [
-    ["EMPTY", Math.max(18, 60 - tier * 8)],
-    ["LOOT", 18 + tier * 3],
-    ["ENEMY", 10 + tier * 5],
-    ["HAZARD", biome === "IRRADIATED" ? 10 + tier * 3 : 3 + tier],
+    ["EMPTY", Math.max(34, 60 - tier * 4)],
+    ["LOOT", 20 + tier * 3],
+    ["ENEMY", 4 + tier],
+    ["HAZARD", biome === "IRRADIATED" ? 8 + tier * 2 : 2 + tier],
     ["CACHE", 4],
     ["SURVIVOR", 4],
   ]);
