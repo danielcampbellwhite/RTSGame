@@ -65,7 +65,7 @@ export interface EnemyDef {
 }
 
 export const ENEMIES: Record<string, EnemyDef> = {
-  scavenger: { key: "scavenger", name: "Scavenger", icon: "🧟", power: 14, hpHit: 10, minTier: 1, fleeable: 0.7 },
+  scavenger: { key: "scavenger", name: "Scavenger", icon: "🥷", power: 14, hpHit: 10, minTier: 1, fleeable: 0.7 },
   raider: { key: "raider", name: "Raider", icon: "🦹", power: 24, hpHit: 16, minTier: 1, fleeable: 0.55 },
   wolf: { key: "wolf", name: "Mutated Wolf", icon: "🐺", power: 30, hpHit: 18, minTier: 2, fleeable: 0.4 },
   bandit: { key: "bandit", name: "Bandit", icon: "🔫", power: 40, hpHit: 24, minTier: 2, fleeable: 0.5 },
