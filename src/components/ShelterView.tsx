@@ -17,7 +17,21 @@ const RES: { k: "food" | "water" | "meds" | "ammo" | "scrap" | "fuel"; name: str
   { k: "fuel", name: "Fuel", icon: "⛽" },
 ];
 
-type Tab = "loadout" | "crew" | "craft" | "build" | "factions";
+type Page = "home" | "loadout" | "crew" | "craft" | "build" | "factions" | "stores";
+
+const MENU: { key: Page; icon: string; label: string }[] = [
+  { key: "loadout", icon: "🎒", label: "Loadout" },
+  { key: "stores", icon: "📦", label: "Stores" },
+  { key: "crew", icon: "👥", label: "Crew" },
+  { key: "craft", icon: "🔨", label: "Crafting" },
+  { key: "build", icon: "🏗️", label: "Build" },
+  { key: "factions", icon: "🤝", label: "Factions" },
+];
+
+const PAGE_TITLE: Record<Page, string> = {
+  home: "Shelter", loadout: "Loadout", crew: "Crew", craft: "Crafting",
+  build: "Build", factions: "Factions", stores: "Shelter Stores",
+};
 
 const SLOTS: { key: string; label: string }[] = [
   { key: "PRIMARY", label: "Primary" },
@@ -45,96 +59,33 @@ function fmtRate(r: number): string {
 export default function ShelterView() {
   const snap = useGame((s) => s.snapshot)!;
   const { run, isPending } = useAction();
-  const [tab, setTab] = useState<Tab>("loadout");
+  const [page, setPage] = useState<Page>("home");
   const { player, shelter, storage, equipped, craftables, factions } = snap;
 
-  return (
-    <div className="h-full w-full space-y-2 overflow-y-auto scroll-thin p-2">
-      {/* Header banner: the shelter interior, with identity + vitals overlaid.
-          Fixed height + shrink-0 so the scrollable column can't squash it. */}
-      <div
-        className="panel relative flex shrink-0 flex-col justify-end overflow-hidden rounded"
-        style={{
-          backgroundImage: "linear-gradient(180deg, rgba(12,10,8,0.15) 0%, rgba(12,10,8,0.5) 45%, rgba(12,10,8,0.94) 100%), url('/shelter.png')",
-          backgroundSize: "cover",
-          backgroundPosition: "center 35%",
-          height: "min(52vw, 240px)",
-        }}
-      >
-        <div className="p-3">
-          <div className="flex items-end justify-between">
-            <div>
-              <div className="title stamp text-xl font-bold text-[#ffd9a8]">{player.name}</div>
-              <div className="text-[0.66rem] text-[var(--ink)]">
-                Lv {player.level} · {player.xp}/{player.xpToNext} XP · Shelter L{shelter.level} · 👥 {shelter.population}/{shelter.popCap} · Rep {player.reputation}
-              </div>
-            </div>
-            <div className="title text-[0.66rem] text-[var(--tox)] stamp">◢ SHELTER ◣</div>
-          </div>
-          <div className="mt-2 grid grid-cols-3 gap-2">
-            <Meter label="Health" value={player.health} max={player.maxHealth} color="#b13838" critical={player.health <= player.maxHealth * 0.3} />
-            <Meter label="Stamina" value={player.stamina} max={100} color="#e0a32e" />
-            <Meter label="Radiation" value={player.radiation} max={100} color="#8fbf3f" critical={player.radiation >= 60} />
-          </div>
+  const idle = shelter.population - (shelter.workFood + shelter.workWater + shelter.workScrap + shelter.workMeds);
+  const readyCraft = craftables.filter((c) => c.affordable).length;
+  const lowStores = shelter.food <= 0 || shelter.water <= 0;
+  const SUBTITLE: Record<Page, string> = {
+    home: "",
+    loadout: equipped.PRIMARY ? equipped.PRIMARY.name : "unarmed",
+    stores: lowStores ? "⚠ supplies critical" : `morale ${Math.round(shelter.morale)}`,
+    crew: idle > 0 ? `${idle} idle` : `${shelter.population} working`,
+    craft: readyCraft > 0 ? `${readyCraft} ready` : "stations",
+    build: `🔩 ${shelter.scrap} · ⛽ ${shelter.fuel}`,
+    factions: "standings",
+  };
+
+  if (page !== "home") {
+    return (
+      <div className="grime h-full w-full overflow-y-auto scroll-thin p-2">
+        {/* Sub-page header: back + title + slim vitals */}
+        <div className="panel mb-2 flex items-center gap-2 rounded p-2">
+          <button className="btn rounded px-2 py-1 text-sm" onClick={() => setPage("home")}>←</button>
+          <span className="title flex-1 text-sm text-[#ffd9a8]">{PAGE_TITLE[page]}</span>
+          <span className="text-[0.58rem] text-[var(--ink-dim)]">❤ {player.health} · ⚡ {player.stamina} · ☢ {player.radiation}</span>
         </div>
-      </div>
 
-      {/* Shelter stores — clearly labelled; these are the PERMANENT stockpile
-          (not carried gear) and slowly deplete over time. */}
-      <div className="panel rounded p-2">
-        <div className="title mb-1 flex items-center justify-between text-[0.58rem] text-[var(--ink-dim)]">
-          <span>Shelter Stores · deplete over time</span>
-          <span>Morale {Math.round(shelter.morale)} · Storage {shelter.storedCount}/{shelter.storageCap}</span>
-        </div>
-        <div className="grid grid-cols-3 gap-1.5">
-          {RES.map(({ k, name, icon }) => {
-            const v = shelter[k];
-            const low = v < 15;
-            const r = storeRate(shelter, k);
-            return (
-              <div key={k} className="inset flex items-center gap-1.5 rounded px-2 py-1">
-                <span className="text-base">{icon}</span>
-                <div className="leading-tight">
-                  <div className="title text-[0.58rem] text-[var(--ink-dim)]">{name}</div>
-                  <div className="flex items-baseline gap-1">
-                    <span className="text-sm" style={{ color: low ? "var(--blood)" : "var(--ink)" }}>{Math.round(v)}</span>
-                    {r !== 0 && (
-                      <span className="text-[0.52rem]" style={{ color: r > 0 ? "var(--good)" : "var(--blood)" }}>
-                        {r > 0 ? "+" : ""}{fmtRate(r)}/h
-                      </span>
-                    )}
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-        {(shelter.food <= 0 || shelter.water <= 0) && (
-          <div className="mt-1 text-center text-[0.66rem] text-[var(--blood)] pulse">
-            ⚠ {shelter.food <= 0 && shelter.water <= 0 ? "Out of food & water" : shelter.food <= 0 ? "Out of food" : "Out of water"} — morale is collapsing. Scavenge or assign crew.
-          </div>
-        )}
-      </div>
-
-      {snap.flash && (
-        <div className="inset rounded px-3 py-2 text-xs text-[var(--amber)]">{snap.flash}</div>
-      )}
-
-      {/* Tabs */}
-      <div className="flex gap-1">
-        {(["loadout", "crew", "craft", "build", "factions"] as Tab[]).map((t) => (
-          <button
-            key={t}
-            onClick={() => setTab(t)}
-            className={`btn flex-1 rounded py-2 text-[0.66rem] ${tab === t ? "border-[var(--rust)] text-[#ffd9a8]" : ""}`}
-          >
-            {t === "loadout" ? "Loadout" : t === "crew" ? "Crew" : t === "craft" ? "Craft" : t === "build" ? "Build" : "Factions"}
-          </button>
-        ))}
-      </div>
-
-      <div>
-        {tab === "loadout" && (
+        {page === "loadout" && (
           <Loadout
             equipped={equipped}
             storage={storage}
@@ -145,13 +96,14 @@ export default function ShelterView() {
             busy={isPending}
           />
         )}
-        {tab === "crew" && (
+        {page === "stores" && <Stores shelter={shelter} />}
+        {page === "crew" && (
           <Crew shelter={shelter} onAssign={(job, d) => run(() => assignWork(player.id, job, d))} busy={isPending} />
         )}
-        {tab === "factions" && (
+        {page === "factions" && (
           <div className="space-y-2">
             <p className="text-[0.66rem] text-[var(--ink-dim)]">
-              Your standing across the wasteland's powers. Help their people to gain favour; kill their fighters and they&apos;ll hunt you.
+              Your standing across the city&apos;s powers. Help their people to gain favour; kill their fighters and they&apos;ll hunt you.
             </p>
             {factions.map((f) => {
               const pct = ((f.rep + 100) / 200) * 100;
@@ -169,7 +121,7 @@ export default function ShelterView() {
             })}
           </div>
         )}
-        {tab === "craft" && (
+        {page === "craft" && (
           <div className="space-y-1">
             {craftables.map((c) => (
               <div key={c.key} className="inset flex items-center justify-between rounded px-2 py-1.5">
@@ -184,7 +136,7 @@ export default function ShelterView() {
             ))}
           </div>
         )}
-        {tab === "build" && (
+        {page === "build" && (
           <div className="space-y-1 text-xs">
             <div className="title flex items-center justify-end gap-2 px-1 text-[0.58rem] text-[var(--ink-dim)]">
               <span>have</span>
@@ -221,12 +173,105 @@ export default function ShelterView() {
           </div>
         )}
       </div>
+    );
+  }
+
+  // ── Home ────────────────────────────────────────────────────────────────────
+  return (
+    <div className="h-full w-full space-y-2 overflow-y-auto scroll-thin p-2">
+      {/* Header banner: the shelter interior, with identity + vitals overlaid. */}
+      <div
+        className="panel relative flex shrink-0 flex-col justify-end overflow-hidden rounded"
+        style={{
+          backgroundImage: "linear-gradient(180deg, rgba(12,10,8,0.15) 0%, rgba(12,10,8,0.5) 45%, rgba(12,10,8,0.94) 100%), url('/shelter.png')",
+          backgroundSize: "cover",
+          backgroundPosition: "center 35%",
+          height: "min(46vw, 210px)",
+        }}
+      >
+        <div className="p-3">
+          <div className="flex items-end justify-between">
+            <div>
+              <div className="title stamp text-xl font-bold text-[#ffd9a8]">{player.name}</div>
+              <div className="text-[0.66rem] text-[var(--ink)]">
+                Lv {player.level} · {player.xp}/{player.xpToNext} XP · Shelter L{shelter.level} · 👥 {shelter.population}/{shelter.popCap} · Rep {player.reputation}
+              </div>
+            </div>
+            <div className="title text-[0.66rem] text-[var(--tox)] stamp">◢ SHELTER ◣</div>
+          </div>
+          <div className="mt-2 grid grid-cols-3 gap-2">
+            <Meter label="Health" value={player.health} max={player.maxHealth} color="#b13838" critical={player.health <= player.maxHealth * 0.3} />
+            <Meter label="Stamina" value={player.stamina} max={100} color="#e0a32e" />
+            <Meter label="Radiation" value={player.radiation} max={100} color="#8fbf3f" critical={player.radiation >= 60} />
+          </div>
+        </div>
+      </div>
+
+      {snap.flash && (
+        <div className="inset rounded px-3 py-2 text-xs text-[var(--amber)]">{snap.flash}</div>
+      )}
+      {lowStores && (
+        <button onClick={() => setPage("stores")} className="inset w-full rounded px-3 py-2 text-center text-[0.72rem] text-[var(--blood)] pulse">
+          ⚠ {shelter.food <= 0 && shelter.water <= 0 ? "Out of food & water" : shelter.food <= 0 ? "Out of food" : "Out of water"} — tap to manage stores.
+        </button>
+      )}
+
+      {/* Navigation menu — each opens its own page */}
+      <div className="grid grid-cols-2 gap-2">
+        {MENU.map((m) => (
+          <button key={m.key} onClick={() => setPage(m.key)} className="panel flex items-center gap-2 rounded p-3 text-left active:opacity-80">
+            <span className="text-2xl">{m.icon}</span>
+            <div className="min-w-0">
+              <div className="title text-xs text-[#ffd9a8]">{m.label}</div>
+              <div className="truncate text-[0.58rem] text-[var(--ink-dim)]">{SUBTITLE[m.key]}</div>
+            </div>
+          </button>
+        ))}
+      </div>
 
       {/* Embark */}
       <Btn variant="go" disabled={isPending} onClick={() => run(() => startExpedition(player.id))} className="w-full py-3 text-sm">
         ☢ Head into the City
       </Btn>
       <SaveCode id={player.id} />
+    </div>
+  );
+}
+
+/** The permanent stockpile — values, hourly rates, storage + morale. */
+function Stores({ shelter }: { shelter: ShelterViewT }) {
+  return (
+    <div className="space-y-2">
+      <div className="title flex items-center justify-between text-[0.58rem] text-[var(--ink-dim)]">
+        <span>Permanent stockpile · deplete over time</span>
+        <span>Morale {Math.round(shelter.morale)} · Storage {shelter.storedCount}/{shelter.storageCap}</span>
+      </div>
+      <div className="grid grid-cols-2 gap-1.5">
+        {RES.map(({ k, name, icon }) => {
+          const v = shelter[k];
+          const low = v < 15;
+          const r = storeRate(shelter, k);
+          return (
+            <div key={k} className="inset flex items-center gap-2 rounded px-2 py-1.5">
+              <span className="text-lg">{icon}</span>
+              <div className="leading-tight">
+                <div className="title text-[0.58rem] text-[var(--ink-dim)]">{name}</div>
+                <div className="flex items-baseline gap-1.5">
+                  <span className="text-base" style={{ color: low ? "var(--blood)" : "var(--ink)" }}>{Math.round(v)}</span>
+                  {r !== 0 && (
+                    <span className="text-[0.58rem]" style={{ color: r > 0 ? "var(--good)" : "var(--blood)" }}>
+                      {r > 0 ? "+" : ""}{fmtRate(r)}/h
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <p className="text-[0.66rem] text-[var(--ink-dim)]">
+        Food &amp; water drain with every mouth to feed — assign crew in the Crew page to keep them topped up. Scrap &amp; fuel power building and crafting.
+      </p>
     </div>
   );
 }

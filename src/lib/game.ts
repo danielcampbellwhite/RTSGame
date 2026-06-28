@@ -12,8 +12,9 @@ export const SURV = {
   fuelPerHour: 1.5,
   /** Below this level a resource is "critical" and morale suffers. */
   lowThreshold: 15,
-  /** Real seconds of one expedition step's stamina cost. */
-  moveStaminaCost: 6,
+  /** Stamina burned per expedition step (a little regenerates each tile, so
+   *  the net drain is gentle — the city is large and worth roaming). */
+  moveStaminaCost: 4,
   staminaRegenOnTile: 2,
   // Combat
   basePunch: 6,

@@ -860,10 +860,13 @@ export async function interact(playerId: string, kind: "look" | "search" | "rest
     } else if (searched.has(key)) {
       log.unshift("You've already picked this spot clean.");
     } else {
+      // Loot only comes from actual stashes — a wreck/dumpster on the street, a
+      // container in a building. Bare ground turns up nothing but the odd scrap.
       const lootTier = cond === "BOUNTIFUL" ? tier + 1 : tier;
-      let drops = lootForTile(sp.lootSeed, { ...tile, tier: lootTier });
-      if (drops.length === 0) {
-        drops = generateLoot(narr, [["scrap", 4], ["cloth", 3], ["ration", 3], ["water_bottle", 3], ["ammo", 2]], lootTier, [1, 2]);
+      const isStash = tile.feature === "LOOT" || tile.feature === "CACHE";
+      let drops = isStash ? lootForTile(sp.lootSeed, { ...tile, tier: lootTier }) : [];
+      if (drops.length === 0 && !isStash && chance(narr, 0.12)) {
+        drops = generateLoot(narr, [["scrap", 4], ["cloth", 3]], 1, [1, 1]);
       }
       searched.add(key);
       const added = addToGround(ground, key, drops);

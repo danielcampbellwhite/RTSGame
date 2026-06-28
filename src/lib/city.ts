@@ -167,10 +167,11 @@ const STREET_LOOT: { icon: string; label: string }[] = [
 export function cityFeature(ventureSeed: number, x: number, y: number): Tile {
   const tier = cityTierAt(x, y);
   const rng = tileRng(hashSeed(ventureSeed, 4242), x, y);
+  // Streets are mostly bare tarmac — real hauls are inside the buildings.
   const feature = weighted<FeatureKind>(rng, [
-    ["EMPTY", 70],
-    ["ENEMY", 16 + tier * 2],
-    ["LOOT", 12],
+    ["EMPTY", 82],
+    ["ENEMY", 14 + tier * 2],
+    ["LOOT", 5],
   ]);
   if (feature === "ENEMY") {
     const candidates = ENEMY_KEYS.filter((k) => ENEMIES[k].minTier <= tier);
